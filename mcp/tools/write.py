@@ -4,7 +4,7 @@ from typing import Literal
 
 from mcp.server.fastmcp import FastMCP, Context
 
-from db import scoped_queryrow, service_queryrow, service_execute
+from db import queryrow, execute
 from .helpers import get_user_id, resolve_kb, deep_link, resolve_path
 
 _ASSET_EXTENSIONS = {".svg", ".csv", ".json", ".xml", ".html"}
@@ -37,7 +37,6 @@ async def _create_note(
         file_type = asset_ext.lstrip(".")
     else:
         slug = _title_lower
-        # Strip .md if Claude passed a filename as the title
         slug = re.sub(r"\.(md|txt)$", "", slug)
         filename = re.sub(r"[^\w\s\-.]", "", slug.replace(" ", "-"))
         if not filename.endswith(".md"):
@@ -45,7 +44,6 @@ async def _create_note(
         file_type = "md"
 
     # Ensure title is human-readable, not a slug
-    # "operating-leverage.md" → "Operating Leverage"
     clean_title = re.sub(r"\.(md|txt|svg|csv|json|xml|html)$", "", title)
     if clean_title == clean_title.lower() and "-" in clean_title:
         clean_title = clean_title.replace("-", " ").replace("_", " ").strip().title()
@@ -53,7 +51,7 @@ async def _create_note(
 
     note_date = date_str or date.today().isoformat()
 
-    doc = await service_queryrow(
+    doc = await queryrow(
         "INSERT INTO documents (knowledge_base_id, user_id, filename, title, path, "
         "file_type, status, content, tags, version) "
         "VALUES ($1, $2, $3, $4, $5, $6, 'ready', $7, $8, 0) "
@@ -70,10 +68,16 @@ async def _create_note(
     elif is_wiki:
         suffix = "\n\nRemember to cite sources using footnotes: `[^1]: source-file.pdf, p.X`"
 
+    # Auto-log for wiki pages
+    if is_wiki:
+        import asyncio
+        from .log_service import log_wiki_created
+        asyncio.ensure_future(log_wiki_created(kb["id"], title, f"{dir_path}{filename}"))
+
     return (
         f"Created **{title}** at `{dir_path}{filename}`\n"
         f"Tags: {', '.join(tags)} | Date: {note_date}\n"
-        f"[View in Supavault]({link}){suffix}"
+        f"[View in LLM Wiki]({link}){suffix}"
     )
 
 
@@ -83,8 +87,7 @@ async def _edit_note(user_id: str, kb: dict, path: str, old_text: str, new_text:
 
     dir_path, filename = resolve_path(path)
 
-    doc = await scoped_queryrow(
-        user_id,
+    doc = await queryrow(
         "SELECT id, content FROM documents "
         "WHERE knowledge_base_id = $1 AND filename = $2 AND path = $3 AND NOT archived",
         kb["id"], filename, dir_path,
@@ -100,21 +103,26 @@ async def _edit_note(user_id: str, kb: dict, path: str, old_text: str, new_text:
         return f"Error: found {count} matches for old_text. Provide more context to match exactly once."
 
     new_content = content.replace(old_text, new_text, 1)
-    await service_execute(
+    await execute(
         "UPDATE documents SET content = $1, version = version + 1 "
-        "WHERE id = $2 AND user_id = $3",
-        new_content, doc["id"], user_id,
+        "WHERE id = $2",
+        new_content, doc["id"],
     )
 
+    # Auto-log for wiki pages
+    if dir_path.startswith("/wiki/"):
+        import asyncio
+        from .log_service import log_wiki_edited
+        asyncio.ensure_future(log_wiki_edited(kb["id"], f"{dir_path}{filename}"))
+
     link = deep_link(kb["slug"], dir_path, filename)
-    return f"Edited `{path}`. Replaced 1 occurrence.\n[View in Supavault]({link})"
+    return f"Edited `{path}`. Replaced 1 occurrence.\n[View in LLM Wiki]({link})"
 
 
-async def _append_note(user_id: str, kb: dict, path: str, content: str) -> str:
+async def _append_note(user_id: str, kb: dict, path: str, append_content: str) -> str:
     dir_path, filename = resolve_path(path)
 
-    doc = await scoped_queryrow(
-        user_id,
+    doc = await queryrow(
         "SELECT id, content FROM documents "
         "WHERE knowledge_base_id = $1 AND filename = $2 AND path = $3 AND NOT archived",
         kb["id"], filename, dir_path,
@@ -122,15 +130,21 @@ async def _append_note(user_id: str, kb: dict, path: str, content: str) -> str:
     if not doc:
         return f"Document '{path}' not found."
 
-    new_content = (doc["content"] or "") + "\n\n" + content
-    await service_execute(
+    new_content = (doc["content"] or "") + "\n\n" + append_content
+    await execute(
         "UPDATE documents SET content = $1, version = version + 1 "
-        "WHERE id = $2 AND user_id = $3",
-        new_content, doc["id"], user_id,
+        "WHERE id = $2",
+        new_content, doc["id"],
     )
 
+    # Auto-log for wiki pages
+    if dir_path.startswith("/wiki/"):
+        import asyncio
+        from .log_service import log_wiki_edited
+        asyncio.ensure_future(log_wiki_edited(kb["id"], f"{dir_path}{filename}"))
+
     link = deep_link(kb["slug"], dir_path, filename)
-    return f"Appended to `{path}`.\n[View in Supavault]({link})"
+    return f"Appended to `{path}`.\n[View in LLM Wiki]({link})"
 
 
 def register(mcp: FastMCP) -> None:

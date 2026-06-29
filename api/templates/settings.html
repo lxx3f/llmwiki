@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}设置 - LLM Wiki{% endblock %}
+{% block content %}
+<div class="max-w-3xl mx-auto p-8">
+    <h1 class="text-2xl font-bold mb-6">系统设置</h1>
+
+    <div class="space-y-6">
+        <!-- MCP Configuration -->
+        <div class="p-5 bg-neutral-900 border border-neutral-800 rounded-xl">
+            <h2 class="font-semibold text-white mb-2">MCP 连接配置</h2>
+            <p class="text-sm text-neutral-400 mb-3">将以下配置添加到 Claude Desktop 的 <code>claude_desktop_config.json</code> 中：</p>
+            <pre class="bg-neutral-800 p-4 rounded-lg text-sm text-neutral-300 overflow-x-auto font-mono">{
+  "mcpServers": {
+    "llmwiki": {
+      "url": "{{ mcp_url }}"
+    }
+  }
+}</pre>
+        </div>
+
+        <!-- System status -->
+        <div class="p-5 bg-neutral-900 border border-neutral-800 rounded-xl">
+            <h2 class="font-semibold text-white mb-3">系统状态</h2>
+            <div class="grid gap-2 text-sm">
+                <div class="flex justify-between py-2 border-b border-neutral-800">
+                    <span class="text-neutral-400">数据库</span>
+                    <span class="text-green-400">已连接 (PostgreSQL)</span>
+                </div>
+                <div class="flex justify-between py-2 border-b border-neutral-800">
+                    <span class="text-neutral-400">存储</span>
+                    <span class="text-green-400">{{ storage_root }}</span>
+                </div>
+                <div class="flex justify-between py-2 border-b border-neutral-800">
+                    <span class="text-neutral-400">Ollama</span>
+                    <span class="text-green-400">{{ ollama_url }}</span>
+                </div>
+                <div class="flex justify-between py-2">
+                    <span class="text-neutral-400">用户 ID</span>
+                    <span class="text-neutral-500 font-mono text-xs">{{ user_id }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

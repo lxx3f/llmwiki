@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}审核提取 - LLM Wiki{% endblock %}
+{% block content %}
+<div class="max-w-3xl mx-auto p-8">
+    <a href="/extractions" class="text-sm text-neutral-500 hover:text-white mb-6 inline-block">&larr; 返回列表</a>
+    <h1 class="text-2xl font-bold mb-6">审核提取结果</h1>
+
+    {% if task %}
+    <div class="space-y-6">
+        <!-- Document info -->
+        <div class="p-4 bg-neutral-900 border border-neutral-800 rounded-xl">
+            <h2 class="text-sm text-neutral-500 mb-2">源文档</h2>
+            <p class="text-white">{{ task.document_id }}</p>
+            <p class="text-xs text-neutral-600 mt-1">创建于 {{ task.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+        </div>
+
+        <!-- AI proposed content -->
+        <div class="p-4 bg-neutral-900 border border-neutral-800 rounded-xl">
+            <h2 class="text-sm text-neutral-500 mb-2">AI 提取建议</h2>
+            {% if task.proposed_content %}
+            <form id="review-form" method="POST">
+                <textarea name="content" rows="15" placeholder="AI 提取的内容..."
+                          class="w-full px-3 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-white mb-3 focus:outline-none focus:border-blue-500 font-mono text-sm">{{ task.proposed_content }}</textarea>
+
+                <label class="text-sm text-neutral-500 block mb-1">建议标签</label>
+                <input name="tags" value="{{ task.proposed_tags | join(', ') if task.proposed_tags else '' }}" placeholder="tag1, tag2, tag3"
+                       class="w-full px-3 py-2 bg-neutral-800 border border-neutral-700 rounded-lg text-white mb-4 focus:outline-none focus:border-blue-500">
+
+                <div class="flex gap-3">
+                    <button type="button" onclick="approve()" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm transition-colors">批准并写入 wiki</button>
+                    <button type="button" onclick="reject()" class="px-4 py-2 bg-red-600/50 hover:bg-red-600 text-white rounded-lg text-sm transition-colors">拒绝</button>
+                    <button type="button" onclick="rerun()" class="px-4 py-2 bg-yellow-600/50 hover:bg-yellow-600 text-white rounded-lg text-sm transition-colors" title="重新让 AI 提取">重新提取</button>
+                </div>
+            </form>
+            {% else %}
+            <div class="text-center py-12">
+                <div class="animate-spin inline-block w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full mb-3"></div>
+                <p class="text-neutral-400 text-sm">AI 正在分析文档内容...</p>
+                <p class="text-neutral-600 text-xs mt-2">页面将自动刷新，请稍候</p>
+                <div class="flex gap-3 justify-center mt-4">
+                    <button type="button" onclick="reject()" class="px-4 py-2 bg-red-600/50 hover:bg-red-600 text-white rounded-lg text-sm transition-colors">取消并拒绝</button>
+                    <button type="button" onclick="rerun()" class="px-4 py-2 bg-yellow-600/50 hover:bg-yellow-600 text-white rounded-lg text-sm transition-colors">重新提取</button>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% else %}
+    <p class="text-neutral-600">任务不存在或已处理</p>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Auto-poll when extraction hasn't completed yet
+{% if task and not task.proposed_content and task.status == 'pending' %}
+(async function poll() {
+    const resp = await fetch('/v1/extractions/{{ task.id }}');
+    const data = await resp.json();
+    if (data.proposed_content) {
+        location.reload();
+    } else if (data.status === 'pending') {
+        setTimeout(poll, 3000);
+    }
+})();
+{% endif %}
+
+async function approve() {
+    const form = document.getElementById('review-form');
+    const content = form.content.value;
+    const tags = form.tags.value.split(',').map(s => s.trim()).filter(Boolean);
+    if (!content.trim()) {
+        window.toast('内容为空，无法批准', 'error');
+        return;
+    }
+    const resp = await fetch('/v1/extractions/{{ task.id }}/approve', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({proposed_content: content, proposed_tags: tags}),
+    });
+    if (resp.ok) {
+        window.toast('已批准并写入 wiki', 'success');
+        setTimeout(() => location.href = '/extractions', 1000);
+    } else {
+        window.toast('操作失败', 'error');
+    }
+}
+async function reject() {
+    const resp = await fetch('/v1/extractions/{{ task.id }}/reject', {method: 'POST'});
+    if (resp.ok) {
+        window.toast('已拒绝', 'success');
+        setTimeout(() => location.href = '/extractions', 1000);
+    } else {
+        window.toast('操作失败', 'error');
+    }
+}
+async function rerun() {
+    const btn = event.target;
+    btn.disabled = true;
+    btn.textContent = '提取中...';
+    const resp = await fetch('/v1/extractions/{{ task.id }}/run', {method: 'POST'});
+    if (resp.ok) {
+        window.toast('已触发提取，等待 AI 生成...', 'success');
+        async function poll() {
+            const r = await fetch('/v1/extractions/{{ task.id }}');
+            const data = await r.json();
+            if (data.proposed_content) {
+                location.reload();
+            } else if (data.status === 'pending') {
+                btn.textContent = '等待 AI 响应...';
+                setTimeout(poll, 3000);
+            } else {
+                window.toast('提取完成但内容为空，请重试', 'error');
+                btn.disabled = false;
+                btn.textContent = '重新提取';
+            }
+        }
+        setTimeout(poll, 3000);
+    } else {
+        window.toast('操作失败', 'error');
+        btn.disabled = false;
+        btn.textContent = '重新提取';
+    }
+}
+</script>
+{% endblock %}

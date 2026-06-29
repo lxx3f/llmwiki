@@ -5,6 +5,7 @@ from .search import register as register_search
 from .read import register as register_read
 from .write import register as register_write
 from .delete import register as register_delete
+from .ask import register as register_ask
 
 
 def register(mcp: FastMCP) -> None:
@@ -13,3 +14,4 @@ def register(mcp: FastMCP) -> None:
     register_read(mcp)
     register_write(mcp)
     register_delete(mcp)
+    register_ask(mcp)

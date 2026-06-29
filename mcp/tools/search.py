@@ -3,7 +3,7 @@ from typing import Literal
 
 from mcp.server.fastmcp import FastMCP, Context
 
-from db import scoped_query, scoped_queryrow
+from db import query, queryrow
 from .helpers import get_user_id, resolve_kb, deep_link, glob_match, MAX_LIST, MAX_SEARCH
 
 logger = logging.getLogger(__name__)
@@ -11,14 +11,14 @@ logger = logging.getLogger(__name__)
 CONTEXT_CHARS = 120
 
 
-def _extract_snippet(content: str, query: str) -> str:
+def _extract_snippet(content: str, query_str: str) -> str:
     if not content:
         return "(empty)"
-    idx = content.lower().find(query.lower())
+    idx = content.lower().find(query_str.lower())
     if idx < 0:
         return content[:CONTEXT_CHARS * 2].strip()
     start = max(0, idx - CONTEXT_CHARS)
-    end = min(len(content), idx + len(query) + CONTEXT_CHARS)
+    end = min(len(content), idx + len(query_str) + CONTEXT_CHARS)
     snippet = content[start:end].strip()
     if start > 0:
         snippet = "..." + snippet
@@ -27,9 +27,8 @@ def _extract_snippet(content: str, query: str) -> str:
     return snippet
 
 
-async def _list_all_kbs(user_id: str) -> str:
-    kbs = await scoped_query(
-        user_id,
+async def _list_all_kbs() -> str:
+    kbs = await query(
         "SELECT name, slug, created_at FROM knowledge_bases ORDER BY created_at DESC",
     )
     if not kbs:
@@ -37,8 +36,7 @@ async def _list_all_kbs(user_id: str) -> str:
 
     lines = ["**Knowledge Bases:**\n"]
     for kb in kbs:
-        doc_count = await scoped_queryrow(
-            user_id,
+        doc_count = await queryrow(
             "SELECT count(*) as cnt FROM documents WHERE knowledge_base_id = ("
             "SELECT id FROM knowledge_bases WHERE slug = $1) AND NOT archived",
             kb["slug"],
@@ -48,9 +46,8 @@ async def _list_all_kbs(user_id: str) -> str:
     return "\n".join(lines)
 
 
-async def _list_documents(user_id: str, kb: dict, target: str, tags: list[str] | None) -> str:
-    docs = await scoped_query(
-        user_id,
+async def _list_documents(kb: dict, target: str, tags: list[str] | None) -> str:
+    docs = await query(
         "SELECT id, filename, title, path, file_type, tags, page_count, updated_at "
         "FROM documents WHERE knowledge_base_id = $1 AND NOT archived "
         "ORDER BY path, filename",
@@ -95,7 +92,7 @@ async def _list_documents(user_id: str, kb: dict, target: str, tags: list[str] |
 
 
 async def _search_chunks(
-    user_id: str, kb: dict, query: str, path: str,
+    kb: dict, query_str: str, path: str,
     tags: list[str] | None, limit: int,
 ) -> str:
     path_filter = ""
@@ -105,8 +102,7 @@ async def _search_chunks(
         elif path == "/" or path == "/*":
             path_filter = " AND d.path NOT LIKE '/wiki/%%'"
 
-    matches = await scoped_query(
-        user_id,
+    matches = await query(
         f"SELECT dc.content, dc.page, dc.header_breadcrumb, dc.chunk_index, "
         f"  d.filename, d.title, d.path, d.file_type, d.tags, "
         f"  pgroonga_score(dc.tableoid, dc.ctid) AS score "
@@ -118,7 +114,7 @@ async def _search_chunks(
         f"{path_filter} "
         f"ORDER BY score DESC, dc.chunk_index "
         f"LIMIT {limit}",
-        kb["id"], query,
+        kb["id"], query_str,
     )
 
     if tags:
@@ -126,14 +122,14 @@ async def _search_chunks(
         matches = [m for m in matches if tag_set.issubset({t.lower() for t in (m.get("tags") or [])})]
 
     if not matches:
-        return f"No matches for `{query}` in {kb['slug']}."
+        return f"No matches for `{query_str}` in {kb['slug']}."
 
-    lines = [f"**{len(matches)} result(s)** for `{query}`:\n"]
+    lines = [f"**{len(matches)} result(s)** for `{query_str}`:\n"]
     for m in matches:
         filepath = f"{m['path']}{m['filename']}"
         page_str = f" (p.{m['page']})" if m['page'] else ""
         breadcrumb = f"\n  {m['header_breadcrumb']}" if m["header_breadcrumb"] else ""
-        snippet = _extract_snippet(m["content"], query)
+        snippet = _extract_snippet(m["content"], query_str)
         link = deep_link(kb["slug"], m["path"], m["filename"])
         score = m.get("score", 0)
         score_str = f" [{score:.1f}]" if score else ""
@@ -169,17 +165,17 @@ def register(mcp: FastMCP) -> None:
         user_id = get_user_id(ctx)
 
         if not knowledge_base:
-            return await _list_all_kbs(user_id)
+            return await _list_all_kbs()
 
         kb = await resolve_kb(user_id, knowledge_base)
         if not kb:
             return f"Knowledge base '{knowledge_base}' not found."
 
         if mode == "list":
-            return await _list_documents(user_id, kb, path, tags)
+            return await _list_documents(kb, path, tags)
         elif mode == "search":
             if not query:
                 return "search mode requires a query."
-            return await _search_chunks(user_id, kb, query, path, tags, min(limit, MAX_SEARCH))
+            return await _search_chunks(kb, query, path, tags, min(limit, MAX_SEARCH))
 
         return f"Unknown mode: {mode}"

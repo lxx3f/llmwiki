@@ -19,22 +19,17 @@ class MeResponse(BaseModel):
 @router.get("/v1/me", response_model=MeResponse)
 async def get_me(
     db: Annotated[ScopedDB, Depends(get_scoped_db)],
+    user_id: Annotated[str, Depends(get_user_id)],
 ):
     row = await db.fetchrow(
-        "SELECT id::text, email, display_name, onboarded FROM users WHERE id = auth.uid()"
-    )
-    if not row:
-        return MeResponse(id="", email="", display_name=None, onboarded=False)
-    return row
-
-
-@router.post("/v1/onboarding/complete", status_code=204)
-async def complete_onboarding(
-    user_id: Annotated[str, Depends(get_user_id)],
-    request: Request,
-):
-    pool = request.app.state.pool
-    await pool.execute(
-        "UPDATE users SET onboarded = true, updated_at = now() WHERE id = $1",
+        "SELECT id::text, email, display_name, onboarded FROM users WHERE id = $1",
         user_id,
     )
+    if not row:
+        return MeResponse(
+            id=user_id,
+            email="local",
+            display_name="Local User",
+            onboarded=True,
+        )
+    return row

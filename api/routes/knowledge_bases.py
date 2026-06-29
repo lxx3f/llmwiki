@@ -1,5 +1,4 @@
 import re
-import secrets
 from datetime import datetime
 from typing import Annotated
 from uuid import UUID
@@ -47,24 +46,6 @@ class KnowledgeBaseOut(BaseModel):
     updated_at: datetime
 
 
-def _slugify(name: str) -> str:
-    slug = name.lower().strip()
-    slug = re.sub(r"[^a-z0-9\s-]", "", slug)
-    slug = re.sub(r"[\s-]+", "-", slug).strip("-")
-    return slug or "kb"
-
-
-async def _unique_slug(pool, user_id: str, name: str) -> str:
-    slug = _slugify(name)
-    exists = await pool.fetchval(
-        "SELECT 1 FROM knowledge_bases WHERE slug = $1 AND user_id = $2",
-        slug, user_id,
-    )
-    if exists:
-        slug = f"{slug}-{secrets.token_hex(3)}"
-    return slug
-
-
 _OVERVIEW_TEMPLATE = """\
 This wiki tracks research on {name}. No sources have been ingested yet.
 
@@ -85,7 +66,7 @@ Chronological record of ingests, queries, and maintenance passes.
 """
 
 
-# ── Read routes (RLS-enforced via ScopedDB) ──
+# ── Read routes ──
 
 @router.get("", response_model=list[KnowledgeBaseOut])
 async def list_knowledge_bases(db: Annotated[ScopedDB, Depends(get_scoped_db)]):
@@ -104,7 +85,7 @@ async def get_knowledge_base(
     return row
 
 
-# ── Write routes (service role via pool) ──
+# ── Write routes ──
 
 @router.post("", response_model=KnowledgeBaseOut, status_code=201)
 async def create_knowledge_base(
@@ -114,22 +95,13 @@ async def create_knowledge_base(
 ):
     pool = request.app.state.pool
 
-    user_count = await pool.fetchval("SELECT COUNT(DISTINCT id) FROM users")
-    if user_count and user_count >= settings.GLOBAL_MAX_USERS:
-        raise HTTPException(
-            status_code=503,
-            detail="We've reached our user capacity for now. Please try again later.",
-        )
-
-    slug = await _unique_slug(pool, user_id, body.name)
-
     conn = await pool.acquire()
     try:
         async with conn.transaction():
             row = await conn.fetchrow(
-                f"INSERT INTO knowledge_bases (user_id, name, slug, description) "
-                f"VALUES ($1, $2, $3, $4) RETURNING {_KB_COLUMNS}",
-                user_id, body.name, slug, body.description,
+                f"INSERT INTO knowledge_bases (user_id, name, description) "
+                f"VALUES ($1, $2, $3) RETURNING {_KB_COLUMNS}",
+                user_id, body.name, body.description,
             )
 
             kb_id = row["id"]
@@ -187,11 +159,10 @@ async def update_knowledge_base(
 
     updates.append("updated_at = now()")
     params.append(kb_id)
-    params.append(user_id)
 
     sql = (
         f"UPDATE knowledge_bases SET {', '.join(updates)} "
-        f"WHERE id = ${idx} AND user_id = ${idx + 1} "
+        f"WHERE id = ${idx} "
         f"RETURNING {_KB_COLUMNS}"
     )
     row = await pool.fetchrow(sql, *params)
@@ -208,8 +179,8 @@ async def delete_knowledge_base(
 ):
     pool = request.app.state.pool
     result = await pool.execute(
-        "DELETE FROM knowledge_bases WHERE id = $1 AND user_id = $2",
-        kb_id, user_id,
+        "DELETE FROM knowledge_bases WHERE id = $1",
+        kb_id,
     )
     if result == "DELETE 0":
         raise HTTPException(status_code=404, detail="Knowledge base not found")

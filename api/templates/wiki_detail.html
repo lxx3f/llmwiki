@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+{% block title %}{{ kb.name }} - LLM Wiki{% endblock %}
+{% block content %}
+<div class="flex h-full">
+    <!-- Wiki sidebar -->
+    <aside class="w-72 bg-neutral-900 border-r border-neutral-800 flex flex-col shrink-0 h-full">
+        <div class="p-4 border-b border-neutral-800 flex items-center justify-between">
+            <div>
+                <h2 class="font-semibold text-white truncate">{{ kb.name }}</h2>
+                <p class="text-xs text-neutral-500 mt-1">{{ kb.slug }}</p>
+            </div>
+        </div>
+
+        <!-- Document tree -->
+        <div class="flex-1 overflow-y-auto" x-data="{tab: 'wiki'}">
+            <div class="flex border-b border-neutral-800">
+                <button @click="tab='wiki'" :class="tab==='wiki' ? 'border-blue-500 text-white' : 'text-neutral-500 hover:text-white'" class="flex-1 px-4 py-2 text-xs font-medium border-b-2 border-transparent transition-colors">Wiki</button>
+                <button @click="tab='sources'" :class="tab==='sources' ? 'border-blue-500 text-white' : 'text-neutral-500 hover:text-white'" class="flex-1 px-4 py-2 text-xs font-medium border-b-2 border-transparent transition-colors">原始资料</button>
+            </div>
+
+            <!-- Wiki pages -->
+            <div x-show="tab==='wiki'" class="p-2">
+                {% for doc in wiki_docs %}
+                <div class="flex items-center group/item">
+                    <a href="/wikis/{{ kb.slug }}?page={{ doc.path }}{{ doc.filename }}"
+                       class="flex-1 block px-3 py-1.5 rounded text-sm text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors {% if active_doc and active_doc.id == doc.id %}bg-neutral-800 text-white{% endif %}">
+                        {{ doc.title or doc.filename }}
+                    </a>
+                    <button onclick="confirmDeleteDoc(event, '{{ doc.id }}', '{{ doc.title or doc.filename | e }}', true)"
+                            class="opacity-0 group-hover/item:opacity-100 px-2 py-0.5 text-xs text-red-400 hover:text-red-300 rounded transition-all shrink-0"
+                            title="删除">✕</button>
+                </div>
+                {% endfor %}
+                {% if not wiki_docs %}
+                <p class="text-xs text-neutral-600 p-3">暂无 wiki 页面</p>
+                {% endif %}
+            </div>
+
+            <!-- Source documents -->
+            <div x-show="tab==='sources'" class="p-2">
+                {% for doc in source_docs %}
+                <div class="flex items-center group/item">
+                    <a href="/wikis/{{ kb.slug }}?doc={{ doc.id }}"
+                       class="flex-1 block px-3 py-1.5 rounded text-sm text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors {% if active_doc and active_doc.id == doc.id %}bg-neutral-800 text-white{% endif %}">
+                        <span class="text-xs text-neutral-600 mr-1">{{ doc.file_type }}</span>
+                        {{ doc.filename }}
+                    </a>
+                    <button onclick="confirmDeleteDoc(event, '{{ doc.id }}', '{{ doc.filename | e }}', false)"
+                            class="opacity-0 group-hover/item:opacity-100 px-2 py-0.5 text-xs text-red-400 hover:text-red-300 rounded transition-all shrink-0"
+                            title="删除">✕</button>
+                </div>
+                {% endfor %}
+                {% if not source_docs %}
+                <p class="text-xs text-neutral-600 p-3">暂无文档</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Upload area -->
+        <div class="p-3 border-t border-neutral-800">
+            <form id="upload-form" class="text-center">
+                <label class="block cursor-pointer px-3 py-2 border-2 border-dashed border-neutral-700 rounded-lg text-xs text-neutral-500 hover:border-blue-600 hover:text-blue-400 transition-colors">
+                    <input type="file" name="file" class="hidden" onchange="handleUpload(this, '{{ kb.id }}')">
+                    拖拽或点击上传文档
+                </label>
+                <div id="upload-progress" class="mt-2 hidden">
+                    <div class="h-1 bg-neutral-800 rounded-full overflow-hidden">
+                        <div id="upload-bar" class="h-1 bg-blue-600 rounded-full w-0 transition-all"></div>
+                    </div>
+                    <p id="upload-text" class="text-xs text-neutral-500 mt-1"></p>
+                </div>
+            </form>
+        </div>
+    </aside>
+
+    <!-- Content area -->
+    <div class="flex-1 overflow-y-auto">
+        {% if active_doc %}
+        <div class="max-w-4xl mx-auto p-8">
+            <!-- Document header -->
+            <div class="mb-6">
+                <div class="flex items-center justify-between">
+                    <h1 class="text-2xl font-bold text-white">{{ active_doc.title or active_doc.filename }}</h1>
+                    <button onclick="confirmDeleteDoc(event, '{{ active_doc.id }}', '{{ active_doc.title or active_doc.filename | e }}', {{ 'true' if active_doc.path and active_doc.path.startswith('/wiki/') else 'false' }})"
+                            class="px-3 py-1 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded transition-colors"
+                            title="删除">删除</button>
+                </div>
+                <div class="flex items-center gap-3 mt-2 text-sm text-neutral-500">
+                    <span>{{ active_doc.file_type }}</span>
+                    {% if active_doc.tags %}
+                    <div class="flex gap-1">
+                        {% for tag in active_doc.tags %}
+                        <span class="px-2 py-0.5 bg-neutral-800 rounded-full text-xs">{{ tag }}</span>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Wiki content (markdown rendered) -->
+            {% if active_doc.path and active_doc.path.startswith('/wiki/') %}
+            <div class="prose prose-invert max-w-none wiki-content">
+                {{ active_doc.content | safe }}
+            </div>
+            {% elif active_doc.file_type in ('md', 'txt') %}
+            <div class="prose prose-invert max-w-none wiki-content">
+                {{ active_doc.content | safe }}
+            </div>
+            {% elif active_doc.file_type == 'pdf' %}
+            <div class="bg-neutral-900 border border-neutral-800 rounded-xl p-6 text-center">
+                <p class="text-neutral-400 mb-3">PDF 文档</p>
+                <a href="/files/{{ active_doc.id }}/source.pdf" target="_blank" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm">打开 PDF</a>
+            </div>
+            {% elif active_doc.file_type in ('png', 'jpg', 'jpeg', 'gif', 'webp') %}
+            <img src="/files/{{ active_doc.id }}/source.{{ active_doc.file_type }}" class="max-w-full rounded-xl">
+            {% elif active_doc.file_type == 'html' %}
+            <a href="/files/{{ active_doc.id }}/tagged.html" target="_blank" class="text-blue-400 hover:text-blue-300">打开 HTML 文档</a>
+            {% else %}
+            <div class="prose prose-invert max-w-none">{{ active_doc.content | safe if active_doc.content else '(无内容)' }}</div>
+            {% endif %}
+        </div>
+        {% else %}
+        <div class="flex items-center justify-center h-full text-neutral-600">
+            <div class="text-center">
+                <p class="text-lg mb-2">选择一个文档或 wiki 页面</p>
+                <p class="text-sm">从侧边栏选择查看内容</p>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Confirm delete dialog -->
+<div id="confirm-delete-dialog" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center" onclick="if(event.target===this){hideConfirmDelete()}">
+    <div class="bg-neutral-900 border border-neutral-700 rounded-xl p-6 w-full max-w-md" onclick="event.stopPropagation()">
+        <h2 class="text-lg font-semibold text-red-400 mb-3">确认删除</h2>
+        <p id="confirm-delete-msg" class="text-sm text-neutral-300 mb-6"></p>
+        <div class="flex justify-end gap-3">
+            <button onclick="hideConfirmDelete()" class="px-4 py-2 text-sm text-neutral-400 hover:text-white transition-colors">取消</button>
+            <button onclick="doDelete()" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm transition-colors">确认删除</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/upload.js?v=2"></script>
+<script>
+let _pendingDelete = null;
+function confirmDeleteDoc(e, docId, docName, isWiki) {
+    e.preventDefault(); e.stopPropagation();
+    _pendingDelete = {type: 'doc', id: docId};
+    const label = isWiki ? 'wiki 页面' : '文档';
+    document.getElementById('confirm-delete-msg').textContent = `确定要删除${label}「${docName}」吗？`;
+    document.getElementById('confirm-delete-dialog').classList.remove('hidden');
+}
+async function doDelete() {
+    if (!_pendingDelete) return;
+    const {id} = _pendingDelete;
+    try {
+        const resp = await fetch(`/v1/documents/${id}`, {method: 'DELETE'});
+        if (!resp.ok) throw new Error('删除失败');
+        window.toast('已删除', 'success');
+        setTimeout(() => location.reload(), 500);
+    } catch (err) {
+        window.toast(err.message, 'error');
+    }
+    hideConfirmDelete();
+}
+function hideConfirmDelete() {
+    document.getElementById('confirm-delete-dialog').classList.add('hidden');
+    _pendingDelete = null;
+}
+</script>
+{% endblock %}

@@ -1,0 +1,41 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker exec *)",
+      "Bash(python -c \"import os; print\\('SSL_CERT_FILE:', repr\\(os.environ.get\\('SSL_CERT_FILE'\\)\\)\\); print\\('REQUESTS_CA_BUNDLE:', repr\\(os.environ.get\\('REQUESTS_CA_BUNDLE'\\)\\)\\); print\\('PIP_CERT:', repr\\(os.environ.get\\('PIP_CERT'\\)\\)\\)\")",
+      "Bash(curl -s http://localhost:11434/api/tags)",
+      "Bash(python -c \"import sys,json; data=json.load\\(sys.stdin\\); [print\\(m['name']\\) for m in data.get\\('models',[]\\)]\")",
+      "Bash(curl -s http://localhost:11434/api/chat -d '{\"model\": \"qwen2.5:7b\", \"messages\": [{\"role\": \"user\", \"content\": \"Say hello and output JSON: {\\\\\"greeting\\\\\": \\\\\"hello\\\\\"}\"}], \"stream\": false, \"options\": {\"temperature\": 0.3}}')",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('content:', repr\\(d.get\\('message',{}\\).get\\('content',''\\)\\)[:500]\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(taskkill //F //IM python.exe)",
+      "Bash(taskkill //F //IM uvicorn.exe)",
+      "Bash(python -m uvicorn main:app --reload --port 8000)",
+      "Bash(curl -s http://localhost:8000/health)",
+      "Bash(curl -s -X POST \"http://localhost:8000/v1/extractions?doc_id=d1d89fbe-f1e4-4570-b481-edf8074d5a2d\")",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d, indent=2, default=str\\)\\)\")",
+      "Bash(curl -s \"http://localhost:8000/v1/extractions/079d8906-d098-4292-99ad-4e5af7e4e735\")",
+      "Bash(curl -s -X POST http://localhost:8000/v1/extractions/079d8906-d098-4292-99ad-4e5af7e4e735/approve -H 'Content-Type: application/json' -d '{\"proposed_content\": \"\", \"proposed_tags\": [\"LoFTR\", \"Transformer\", \"feature-matching\"]}' -w '\\\\nHTTP %{http_code}')",
+      "Read(//c/Users/23236/.claude/**)",
+      "Read(//c/Users/23236/**)",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\('mcpServers',{}\\), indent=2\\)\\)\")",
+      "Bash(python -c 'import json; d=json.load\\(open\\('\\\\''C:\\\\Users\\\\23236/.claude.json'\\\\''\\)\\); print\\(list\\(d.keys\\(\\)\\)\\)')",
+      "Bash(curl -s http://localhost:8080/health)",
+      "Bash(pip install *)",
+      "Bash(python -m uvicorn server:app --port 8080)",
+      "Bash(echo \"API: $\\(curl -s http://localhost:8000/health\\)\")",
+      "Bash(echo \"MCP: $\\(curl -s http://localhost:8080/health\\)\")",
+      "Bash(pip --version)",
+      "Bash(curl -s http://localhost:8000/)",
+      "Bash(curl -s http://localhost:8000/v1/knowledge-bases)",
+      "Bash(python -m json.tool)",
+      "Bash(curl -s http://localhost:8000/v1/extractions)",
+      "Bash(curl -s \"http://localhost:8000/v1/knowledge-bases/t/documents\")",
+      "Bash(curl -s \"http://localhost:8000/v1/extractions\")",
+      "Bash(python -c \"import sys,json; tasks=json.load\\(sys.stdin\\); print\\(f'Total: {len\\(tasks\\)}'\\); [print\\(f'  - {t[\\\\\"id\\\\\"][:8]} status={t[\\\\\"status\\\\\"]} content_len={len\\(t.get\\(\\\\\"proposed_content\\\\\"\\) or \\\\\"\\\\\"\\)} tags={t.get\\(\\\\\"proposed_tags\\\\\"\\)}'\\) for t in tasks]\")",
+      "Bash(curl -s \"http://localhost:8000/v1/knowledge-bases/a6be304b-f0f6-4c28-b46d-1d16de08c56b/documents?type=wiki\")",
+      "Bash(python -c \"import sys,json; docs=json.load\\(sys.stdin\\); print\\(f'Wiki pages: {len\\(docs\\)}'\\); [print\\(f'  - {d[\\\\\"title\\\\\"]} \\({d[\\\\\"path\\\\\"]}\\)'\\) for d in docs]\")",
+      "Bash(curl -s \"http://localhost:8000/v1/documents/3f3bf0f9-249d-4a4d-8a38-c499d6455b56/content\")"
+    ]
+  }
+}

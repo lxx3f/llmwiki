@@ -1,7 +1,7 @@
 from mcp.server.fastmcp import FastMCP, Context
 
 from config import settings
-from db import scoped_query
+from db import query
 from .helpers import get_user_id
 
 GUIDE_TEXT = """# LLM Wiki — How It Works
@@ -164,9 +164,8 @@ def register(mcp: FastMCP) -> None:
         description="Get started with LLM Wiki. Call this to understand how the knowledge vault works and see your available knowledge bases.",
     )
     async def guide(ctx: Context) -> str:
-        user_id = get_user_id(ctx)
-        kbs = await scoped_query(
-            user_id,
+        get_user_id(ctx)
+        kbs = await query(
             "SELECT name, slug, "
             "  (SELECT count(*) FROM documents d WHERE d.knowledge_base_id = kb.id AND d.path NOT LIKE '/wiki/%%' AND NOT d.archived) as source_count, "
             "  (SELECT count(*) FROM documents d WHERE d.knowledge_base_id = kb.id AND d.path LIKE '/wiki/%%' AND NOT d.archived) as wiki_count "

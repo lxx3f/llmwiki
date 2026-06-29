@@ -4,7 +4,6 @@ import logging
 import subprocess
 import tempfile
 from pathlib import Path
-from urllib.parse import urlparse
 
 import httpx
 from fastapi import FastAPI, HTTPException, Header
@@ -13,24 +12,17 @@ from pydantic import BaseModel
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Supavault Converter")
+app = FastAPI(title="LLM Wiki Converter")
 
 ALLOWED_EXTENSIONS = {"pptx", "ppt", "docx", "doc"}
 CONVERT_TIMEOUT = 120
 CONVERTER_SECRET = os.environ.get("CONVERTER_SECRET", "")
-S3_HOST_SUFFIX = ".amazonaws.com"
 
 
 class ConvertRequest(BaseModel):
     source_url: str
     result_url: str
     source_ext: str
-
-
-def _validate_s3_url(url: str) -> None:
-    parsed = urlparse(url)
-    if not parsed.hostname or not parsed.hostname.endswith(S3_HOST_SUFFIX):
-        raise HTTPException(400, "URLs must point to S3")
 
 
 @app.get("/health")
@@ -51,12 +43,10 @@ async def convert(
     if req.source_ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(400, f"Unsupported extension: {req.source_ext}")
 
-    _validate_s3_url(req.source_url)
-    _validate_s3_url(req.result_url)
-
     with tempfile.TemporaryDirectory(dir="/tmp/conversions") as tmpdir:
         source_path = Path(tmpdir) / f"source.{req.source_ext}"
 
+        # Download source from URL (could be local API or any HTTP endpoint)
         async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=10.0)) as client:
             resp = await client.get(req.source_url)
             resp.raise_for_status()
@@ -82,6 +72,7 @@ async def convert(
 
         pdf_bytes = await asyncio.to_thread(pdf_path.read_bytes)
 
+        # Upload result to target URL
         async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=10.0)) as client:
             resp = await client.put(
                 req.result_url,

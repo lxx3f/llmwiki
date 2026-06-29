@@ -1,4 +1,4 @@
-"""Supavault MCP Server — knowledge vault tools for Claude."""
+"""LLM Wiki MCP Server — knowledge vault tools for Claude."""
 
 import os
 
@@ -14,7 +14,7 @@ from pydantic import AnyHttpUrl
 from starlette.responses import PlainTextResponse
 from starlette.routing import Route
 
-from auth import SupabaseTokenVerifier
+from auth import SingleUserTokenVerifier
 from config import settings
 from tools import register
 
@@ -27,7 +27,7 @@ if settings.SENTRY_DSN:
     )
 
 if settings.LOGFIRE_TOKEN:
-    logfire.configure(token=settings.LOGFIRE_TOKEN, service_name="supavault-mcp")
+    logfire.configure(token=settings.LOGFIRE_TOKEN, service_name="llmwiki-mcp")
     logfire.instrument_asyncpg()
 
 _mcp_host = urlparse(settings.MCP_URL).hostname or "localhost"
@@ -41,9 +41,9 @@ mcp = FastMCP(
         "pages from the raw sources. Call the `guide` tool first to see available knowledge "
         "bases and learn the full workflow."
     ),
-    token_verifier=SupabaseTokenVerifier(),
+    token_verifier=SingleUserTokenVerifier(),
     auth=AuthSettings(
-        issuer_url=AnyHttpUrl(f"{settings.SUPABASE_URL}/auth/v1"),
+        issuer_url=AnyHttpUrl(settings.MCP_URL),
         resource_server_url=AnyHttpUrl(settings.MCP_URL),
     ),
     transport_security=TransportSecuritySettings(

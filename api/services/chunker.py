@@ -45,7 +45,7 @@ def chunk_text(
     if not content or not content.strip():
         return []
 
-    paragraphs = _split_paragraphs(content)
+    paragraphs = _split_long_paragraphs(_split_paragraphs(content), chunk_size)
     header_stack: list[tuple[int, str]] = []
     chunks: list[Chunk] = []
     current_blocks: list[str] = []
@@ -157,6 +157,47 @@ def _split_paragraphs(text: str) -> list[str]:
     """Split on double newlines, preserving paragraph structure."""
     parts = re.split(r'\n\s*\n', text)
     return [p.strip() for p in parts if p.strip()]
+
+
+def _split_long_paragraphs(paragraphs: list[str], max_tokens: int) -> list[str]:
+    """Split any paragraph that exceeds max_tokens into smaller pieces.
+
+    First tries splitting by single newlines (for code blocks), then falls
+    back to character-count splitting to guarantee no chunk exceeds DB limits.
+    """
+    result: list[str] = []
+    max_chars = max_tokens * 4  # rough upper bound matching _estimate_tokens
+
+    for para in paragraphs:
+        if _estimate_tokens(para) <= max_tokens:
+            result.append(para)
+            continue
+
+        # Try splitting by single newlines first
+        lines = para.split('\n')
+        sub: list[str] = []
+        sub_tokens = 0
+        for line in lines:
+            lt = _estimate_tokens(line)
+            if sub_tokens + lt > max_tokens and sub:
+                result.append('\n'.join(sub))
+                sub = [line]
+                sub_tokens = lt
+            else:
+                sub.append(line)
+                sub_tokens += lt
+        if sub:
+            # Last sub-block may still be too large — force-split by chars
+            merged = '\n'.join(sub)
+            if _estimate_tokens(merged) > max_tokens:
+                for i in range(0, len(merged), max_chars):
+                    piece = merged[i:i + max_chars].strip()
+                    if piece:
+                        result.append(piece)
+            else:
+                result.append(merged)
+
+    return result
 
 
 def _get_overlap(blocks: list[str], target_tokens: int) -> tuple[list[str], int]:

@@ -5,10 +5,10 @@ import logging
 from mcp.server.fastmcp import FastMCP, Context
 from mcp.types import TextContent, ImageContent
 
-from db import scoped_query, scoped_queryrow
+from db import query, queryrow
 from .helpers import (
     get_user_id, resolve_kb, deep_link, resolve_path,
-    load_s3_bytes, parse_page_range, glob_match,
+    load_local_file, parse_page_range, glob_match,
 )
 
 logger = logging.getLogger(__name__)
@@ -71,11 +71,9 @@ async def _read_pages(
     if not page_nums:
         return header + f"Invalid page range: {pages_str} (document has {max_page} pages)"
 
-    user_id = str(doc["user_id"])
     doc_id = str(doc["id"])
 
-    page_rows = await scoped_query(
-        user_id,
+    page_rows = await query(
         "SELECT page, content, elements FROM document_pages "
         "WHERE document_id = $1 AND page = ANY($2) ORDER BY page",
         doc["id"], page_nums,
@@ -104,8 +102,8 @@ async def _read_pages(
             img_id = img_meta.get("id")
             if not img_id:
                 continue
-            s3_key = f"{user_id}/{doc_id}/images/{img_id}"
-            img_bytes = await load_s3_bytes(s3_key)
+            local_key = f"{doc_id}/images/{img_id}"
+            img_bytes = await load_local_file(local_key)
             if img_bytes:
                 fmt = "jpeg" if img_id.endswith((".jpg", ".jpeg")) else "png"
                 content_blocks.append(_image(img_bytes, fmt))
@@ -117,9 +115,7 @@ async def _read_pages(
 
 
 async def _read_spreadsheet_index(doc: dict, header: str) -> str:
-    user_id = str(doc["user_id"])
-    page_rows = await scoped_query(
-        user_id,
+    page_rows = await query(
         "SELECT page, content, elements FROM document_pages "
         "WHERE document_id = $1 ORDER BY page",
         doc["id"],
@@ -139,9 +135,8 @@ async def _read_spreadsheet_index(doc: dict, header: str) -> str:
     return "\n".join(lines)
 
 
-async def _read_batch(user_id: str, kb: dict, path: str) -> str:
-    docs = await scoped_query(
-        user_id,
+async def _read_batch(kb: dict, path: str) -> str:
+    docs = await query(
         "SELECT id, filename, title, path, content, tags, file_type, page_count "
         "FROM documents WHERE knowledge_base_id = $1 AND NOT archived "
         "ORDER BY path, filename",
@@ -178,8 +173,7 @@ async def _read_batch(user_id: str, kb: dict, path: str) -> str:
             chars_used += len(content)
 
         elif (doc.get("page_count") or 0) > 0:
-            page_rows = await scoped_query(
-                user_id,
+            page_rows = await query(
                 "SELECT page, content FROM document_pages "
                 "WHERE document_id = $1 ORDER BY page",
                 doc["id"],
@@ -259,21 +253,19 @@ def register(mcp: FastMCP) -> None:
 
         is_glob = "*" in path or "?" in path
         if is_glob:
-            return await _read_batch(user_id, kb, path)
+            return await _read_batch(kb, path)
 
         dir_path, filename = resolve_path(path)
 
-        doc = await scoped_queryrow(
-            user_id,
-            "SELECT id, user_id, filename, title, path, content, tags, version, file_type, "
+        doc = await queryrow(
+            "SELECT id, filename, title, path, content, tags, version, file_type, "
             "page_count, created_at, updated_at "
             "FROM documents WHERE knowledge_base_id = $1 AND filename = $2 AND path = $3 AND NOT archived",
             kb["id"], filename, dir_path,
         )
         if not doc:
-            doc = await scoped_queryrow(
-                user_id,
-                "SELECT id, user_id, filename, title, path, content, tags, version, file_type, "
+            doc = await queryrow(
+                "SELECT id, filename, title, path, content, tags, version, file_type, "
                 "page_count, created_at, updated_at "
                 "FROM documents WHERE knowledge_base_id = $1 AND (filename = $2 OR title = $2) AND NOT archived",
                 kb["id"], path.lstrip("/").split("/")[-1],
@@ -293,14 +285,14 @@ def register(mcp: FastMCP) -> None:
         )
         if doc["page_count"]:
             header += f" | Pages: {doc['page_count']}"
-        header += f"\n[View in Supavault]({link})\n\n---\n\n"
+        header += f"\n[View in LLM Wiki]({link})\n\n---\n\n"
 
         image_types = {"png", "jpg", "jpeg", "webp", "gif"}
         if file_type in image_types:
             if not include_images:
                 return header + "(Image file — set `include_images=true` to view)"
-            s3_key = f"{doc['user_id']}/{doc['id']}/source.{file_type}"
-            img_bytes = await load_s3_bytes(s3_key)
+            local_key = f"{doc['id']}/source.{file_type}"
+            img_bytes = await load_local_file(local_key)
             if img_bytes:
                 fmt = "jpeg" if file_type in ("jpg", "jpeg") else file_type
                 return [_text(header), _image(img_bytes, fmt)]

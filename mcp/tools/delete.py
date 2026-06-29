@@ -1,6 +1,6 @@
 from mcp.server.fastmcp import FastMCP, Context
 
-from db import scoped_query, scoped_queryrow, service_execute
+from db import query, queryrow, execute
 from .helpers import get_user_id, resolve_kb, glob_match, resolve_path
 
 _PROTECTED_FILES = {("/wiki/", "overview.md"), ("/wiki/", "log.md")}
@@ -42,8 +42,7 @@ def register(mcp: FastMCP) -> None:
         is_glob = "*" in path or "?" in path
 
         if is_glob:
-            docs = await scoped_query(
-                user_id,
+            docs = await query(
                 "SELECT id, filename, title, path FROM documents "
                 "WHERE knowledge_base_id = $1 AND NOT archived ORDER BY path, filename",
                 kb["id"],
@@ -53,8 +52,7 @@ def register(mcp: FastMCP) -> None:
         else:
             dir_path, filename = resolve_path(path)
 
-            doc = await scoped_queryrow(
-                user_id,
+            doc = await queryrow(
                 "SELECT id, filename, title, path FROM documents "
                 "WHERE knowledge_base_id = $1 AND filename = $2 AND path = $3 AND NOT archived",
                 kb["id"], filename, dir_path,
@@ -72,11 +70,20 @@ def register(mcp: FastMCP) -> None:
             return f"Cannot delete {names} — these are structural wiki pages. Use `write` to edit their content instead."
 
         doc_ids = [str(d["id"]) for d in deletable]
-        await service_execute(
+        await execute(
             "UPDATE documents SET archived = true, updated_at = now() "
-            "WHERE id = ANY($1::uuid[]) AND user_id = $2",
-            doc_ids, user_id,
+            "WHERE id = ANY($1::uuid[])",
+            doc_ids,
         )
+
+        # Auto-log each deleted wiki page
+        import asyncio
+        from .log_service import log_wiki_deleted
+        for d in deletable:
+            if d["path"].startswith("/wiki/"):
+                asyncio.ensure_future(log_wiki_deleted(
+                    kb["id"], d["filename"], d["path"],
+                ))
 
         lines = [f"Deleted {len(deletable)} document(s):\n"]
         for d in deletable:

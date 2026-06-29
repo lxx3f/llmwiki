@@ -8,6 +8,7 @@ import yaml
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
+from config import settings
 from deps import get_scoped_db, get_user_id
 from scoped_db import ScopedDB
 from services.chunker import chunk_text, store_chunks
@@ -85,7 +86,7 @@ class BulkDelete(BaseModel):
     ids: list[UUID]
 
 
-# ── Read routes (RLS-enforced via ScopedDB) ──
+# ── Read routes ──
 
 @router.get("/v1/knowledge-bases/{kb_id}/documents", response_model=list[DocumentOut])
 async def list_documents(
@@ -130,28 +131,26 @@ async def get_document_url(
     db: Annotated[ScopedDB, Depends(get_scoped_db)],
     request: Request,
 ):
+    """Return a local file download URL for the document."""
     row = await db.fetchrow(
-        "SELECT id, user_id, filename, file_type FROM documents WHERE id = $1",
+        "SELECT id, filename, file_type FROM documents WHERE id = $1",
         doc_id,
     )
     if not row:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    s3_service = request.app.state.s3_service
-    if not s3_service:
-        raise HTTPException(status_code=501, detail="File storage not configured")
-
+    storage = request.app.state.storage
     ext = row["filename"].rsplit(".", 1)[-1].lower() if "." in row["filename"] else row["file_type"]
     office_types = {"pptx", "ppt", "docx", "doc"}
     html_types = {"html", "htm"}
     if ext in office_types:
-        s3_key = f"{row['user_id']}/{row['id']}/converted.pdf"
+        file_key = f"{row['id']}/converted.pdf"
     elif ext in html_types:
-        s3_key = f"{row['user_id']}/{row['id']}/tagged.html"
+        file_key = f"{row['id']}/tagged.html"
     else:
-        s3_key = f"{row['user_id']}/{row['id']}/source.{ext}"
-    url = await s3_service.generate_presigned_get(s3_key)
-    return {"url": url}
+        file_key = f"{row['id']}/source.{ext}"
+
+    return {"url": f"{settings.API_URL}/files/{file_key}"}
 
 
 @router.get("/v1/documents/{doc_id}/content", response_model=DocumentContent)
@@ -168,7 +167,7 @@ async def get_document_content(
     return row
 
 
-# ── Write routes (service role via pool, explicit user_id auth) ──
+# ── Write routes ──
 
 @router.post("/v1/knowledge-bases/{kb_id}/documents/note", response_model=DocumentOut, status_code=201)
 async def create_note(
@@ -180,8 +179,8 @@ async def create_note(
     pool = request.app.state.pool
 
     kb = await pool.fetchval(
-        "SELECT id FROM knowledge_bases WHERE id = $1 AND user_id = $2",
-        kb_id, user_id,
+        "SELECT id FROM knowledge_bases WHERE id = $1",
+        kb_id,
     )
     if not kb:
         raise HTTPException(status_code=404, detail="Knowledge base not found")
@@ -191,7 +190,6 @@ async def create_note(
     if isinstance(meta.get("title"), str) and meta["title"].strip():
         title = meta["title"].strip()
     else:
-        # Humanize filename: "operating-leverage.md" → "Operating Leverage"
         stem = body.filename.rsplit(".", 1)[0] if "." in body.filename else body.filename
         title = stem.replace("-", " ").replace("_", " ").strip().title()
 
@@ -215,6 +213,11 @@ async def create_note(
     finally:
         await pool.release(conn)
 
+    # Auto-log
+    import asyncio
+    from services.log_service import log_note_created
+    asyncio.create_task(log_note_created(pool, str(kb_id), user_id, title, body.path))
+
     return dict(row)
 
 
@@ -229,9 +232,9 @@ async def update_document_content(
 
     row = await pool.fetchrow(
         "UPDATE documents SET content = $1, version = version + 1, updated_at = now() "
-        "WHERE id = $2 AND user_id = $3 "
+        "WHERE id = $2 "
         "RETURNING id, content, version",
-        body.content, doc_id, user_id,
+        body.content, doc_id,
     )
     if not row:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -242,6 +245,18 @@ async def update_document_content(
     if kb_id:
         chunks = chunk_text(body.content) if body.content else []
         await store_chunks(pool, str(doc_id), user_id, kb_id, chunks)
+
+    # Auto-log
+    import asyncio
+    from services.log_service import log_content_updated
+    doc_info = await pool.fetchrow(
+        "SELECT title, filename, knowledge_base_id FROM documents WHERE id = $1", doc_id,
+    )
+    if doc_info:
+        asyncio.create_task(log_content_updated(
+            pool, str(doc_info["knowledge_base_id"]), user_id,
+            doc_info["title"] or "", doc_info["filename"],
+        ))
 
     return dict(row)
 
@@ -289,11 +304,10 @@ async def update_document_metadata(
 
     updates.append("updated_at = now()")
     params.append(doc_id)
-    params.append(user_id)
 
     sql = (
         f"UPDATE documents SET {', '.join(updates)} "
-        f"WHERE id = ${idx} AND user_id = ${idx + 1} "
+        f"WHERE id = ${idx} "
         f"RETURNING {_DOC_COLUMNS}"
     )
     row = await pool.fetchrow(sql, *params)
@@ -311,11 +325,32 @@ async def bulk_delete_documents(
     if not body.ids:
         return
     pool = request.app.state.pool
+
+    # Fetch doc info for logging before archiving
+    rows = await pool.fetch(
+        "SELECT id, filename, title, knowledge_base_id FROM documents WHERE id = ANY($1::uuid[])",
+        [str(i) for i in body.ids],
+    )
+
     await pool.execute(
         "UPDATE documents SET archived = true, updated_at = now() "
-        "WHERE id = ANY($1::uuid[]) AND user_id = $2",
-        [str(i) for i in body.ids], user_id,
+        "WHERE id = ANY($1::uuid[])",
+        [str(i) for i in body.ids],
     )
+
+    if rows:
+        import asyncio
+        from services.log_service import log_document_deleted
+        by_kb: dict = {}
+        for r in rows:
+            by_kb.setdefault(str(r["knowledge_base_id"]), []).append(r)
+        for kb_id, docs in by_kb.items():
+            first = docs[0]
+            asyncio.create_task(log_document_deleted(
+                pool, kb_id, user_id,
+                first["title"] or first["filename"],
+                count=len(docs),
+            ))
 
 
 @router.delete("/v1/documents/{doc_id}", status_code=204)
@@ -325,10 +360,23 @@ async def delete_document(
     request: Request,
 ):
     pool = request.app.state.pool
+
+    doc_info = await pool.fetchrow(
+        "SELECT filename, title, knowledge_base_id FROM documents WHERE id = $1", doc_id,
+    )
     result = await pool.execute(
         "UPDATE documents SET archived = true, updated_at = now() "
-        "WHERE id = $1 AND user_id = $2",
-        doc_id, user_id,
+        "WHERE id = $1",
+        doc_id,
     )
     if result == "UPDATE 0":
         raise HTTPException(status_code=404, detail="Document not found")
+
+    # Auto-log
+    if doc_info:
+        import asyncio
+        from services.log_service import log_document_deleted
+        asyncio.create_task(log_document_deleted(
+            pool, str(doc_info["knowledge_base_id"]), user_id,
+            doc_info["title"] or doc_info["filename"],
+        ))
