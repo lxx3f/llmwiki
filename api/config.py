@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     # Ollama (embedding + local LLM)
     OLLAMA_URL: str = "http://localhost:11434"
     EMBEDDING_MODEL: str = "nomic-embed-text"
-    LLM_MODEL: str = "qwen2.5:7b"  # for knowledge extraction, Q&A etc.
+    LLM_MODEL: str = "qwen2.5:14b"  # for knowledge extraction, Q&A etc.
     EMBEDDING_DIM: int = 768
 
     # OCR / document processing

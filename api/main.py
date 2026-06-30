@@ -76,11 +76,30 @@ async def _ensure_single_user(pool: asyncpg.Pool) -> str:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    pool = await asyncpg.create_pool(settings.DATABASE_URL, min_size=2, max_size=10)
+    try:
+        pool = await asyncpg.create_pool(settings.DATABASE_URL, min_size=2, max_size=10)
+    except (OSError, asyncpg.exceptions.PostgresError) as e:
+        logger.critical(
+            "❌ 无法连接到 PostgreSQL 数据库，请检查：\n"
+            "  1. Docker 容器是否已启动？运行: docker compose up -d\n"
+            "  2. DATABASE_URL 是否正确？当前: %s\n"
+            "  3. 端口 5432 是否被占用？运行: docker ps\n"
+            "  原始错误: %s",
+            settings.DATABASE_URL, e,
+        )
+        raise SystemExit(1) from e
+
     app.state.pool = pool
 
     # Ensure single user exists
-    app.state.effective_user_id = await _ensure_single_user(pool)
+    try:
+        app.state.effective_user_id = await _ensure_single_user(pool)
+    except Exception as e:
+        logger.critical(
+            "❌ 初始化用户数据失败: %s\n请检查数据库迁移是否已执行。", e
+        )
+        await pool.close()
+        raise SystemExit(1) from e
 
     # Local storage (always available)
     from services.local_storage import LocalStorageService
@@ -211,7 +230,9 @@ async def wiki_detail_page(request: Request, slug: str, doc: str = None, page: s
     # Markdown rendering (server-side)
     if active_doc and active_doc.get("content"):
         import mistune
-        md = mistune.create_markdown()
+        md = mistune.create_markdown(plugins=[
+            "table", "strikethrough", "footnotes", "task_lists", "url",
+        ])
         active_doc["content"] = md(active_doc["content"])
 
     return templates.TemplateResponse("wiki_detail.html", {

@@ -35,7 +35,24 @@
       "Bash(python -c \"import sys,json; tasks=json.load\\(sys.stdin\\); print\\(f'Total: {len\\(tasks\\)}'\\); [print\\(f'  - {t[\\\\\"id\\\\\"][:8]} status={t[\\\\\"status\\\\\"]} content_len={len\\(t.get\\(\\\\\"proposed_content\\\\\"\\) or \\\\\"\\\\\"\\)} tags={t.get\\(\\\\\"proposed_tags\\\\\"\\)}'\\) for t in tasks]\")",
       "Bash(curl -s \"http://localhost:8000/v1/knowledge-bases/a6be304b-f0f6-4c28-b46d-1d16de08c56b/documents?type=wiki\")",
       "Bash(python -c \"import sys,json; docs=json.load\\(sys.stdin\\); print\\(f'Wiki pages: {len\\(docs\\)}'\\); [print\\(f'  - {d[\\\\\"title\\\\\"]} \\({d[\\\\\"path\\\\\"]}\\)'\\) for d in docs]\")",
-      "Bash(curl -s \"http://localhost:8000/v1/documents/3f3bf0f9-249d-4a4d-8a38-c499d6455b56/content\")"
+      "Bash(curl -s \"http://localhost:8000/v1/documents/3f3bf0f9-249d-4a4d-8a38-c499d6455b56/content\")",
+      "Bash(python -c \"import mistune; print\\(mistune.__version__\\)\")",
+      "Bash(python -c \"import mistune; help\\(mistune.create_markdown\\)\")",
+      "Bash(python -c \"import mistune; m = mistune.create_markdown\\(plugins=['table','strikethrough','footnotes','task_lists','url']\\); print\\(m\\('| a | b |\\\\n|---|---|\\\\n| 1 | 2 |'\\)\\)\")",
+      "Read(//c/Users/23236/work/work/.obsidian/themes/Typewriter/**)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8000/health)",
+      "Bash(curl -s http://localhost:8000/static/css/app.css)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8000/static/css/app.css)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8000/)",
+      "Bash(curl -s http://localhost:8000/static/css/components.css)",
+      "Bash(curl -s http://localhost:8000/static/css/utilities.css)",
+      "Bash(curl -sI http://localhost:8000/static/css/app.css)",
+      "Bash(curl -sI http://localhost:8000/static/css/variables.css)",
+      "Bash(curl -s http://localhost:8000/static/css/variables.css)",
+      "Bash(curl -s http://localhost:8000/static/css/reset.css)",
+      "Bash(curl -s http://localhost:8000/static/css/wiki-content.css)",
+      "Bash(cat variables.css reset.css wiki-content.css components.css utilities.css)",
+      "Read(//tmp/**)"
     ]
   }
 }

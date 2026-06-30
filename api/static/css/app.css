@@ -1,46 +1,867 @@
-/* LLM Wiki - minimal dark theme */
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-html{font-family:system-ui,-apple-system,sans-serif;color-scheme:dark}
-body{background:#0a0a0a;color:#f5f5f5;line-height:1.6}
+/* ================================================================
+   LLM Wiki — Typewriter-inspired theme
+   Based on Obsidian Typewriter by crashmoney
+   Warm paper tones, green accent, high contrast text
+
+   Sections:
+   1.  Design tokens (change theme here)
+   2.  Reset, body, scrollbar, animations
+   3.  App shell layout (independent of Tailwind CDN)
+   4.  Wiki content (markdown rendering)
+   5.  Component classes
+   6.  Utilities
+   ================================================================ */
+
+/* ─────────────────────────────────────────────
+   1. Design tokens
+   ───────────────────────────────────────────── */
+:root {
+  /* Accent */
+  --color-accent:          hsl(129, 32%, 47%);
+  --color-accent-hover:    hsl(129, 32%, 38%);
+  --color-accent-light:    hsl(129, 25%, 92%);
+  --color-accent-bg:       hsl(129, 20%, 90%);
+  --color-accent-focus:    hsl(129, 32%, 55%);
+  --color-accent-border:   hsl(129, 32%, 65%);
+
+  /* Neutral backgrounds */
+  --color-bg:              hsl(44, 40%, 96%);
+  --color-bg-sidebar:      hsl(42, 25%, 93%);
+  --color-bg-card:         hsl(44, 30%, 99%);
+  --color-bg-input:        hsl(40, 20%, 97%);
+  --color-bg-code:         hsl(42, 20%, 93%);
+  --color-bg-pre:          hsl(42, 25%, 95%);
+  --color-bg-hover:        hsl(40, 15%, 90%);
+  --color-bg-active:       hsl(40, 15%, 87%);
+  --color-bg-stripe:       hsl(42, 15%, 97%);
+  --color-bg-table-head:   hsl(42, 25%, 94%);
+
+  /* Borders */
+  --color-border:          hsl(40, 15%, 87%);
+  --color-border-light:    hsl(40, 15%, 85%);
+  --color-border-pre:      hsl(40, 15%, 88%);
+  --color-border-dashed:   hsl(40, 15%, 80%);
+
+  /* Text */
+  --color-text:            hsl(0, 0%, 5%);
+  --color-text-heading:    hsl(0, 0%, 6%);
+  --color-text-body:       hsl(0, 0%, 12%);
+  --color-text-dim:        hsl(0, 0%, 18%);
+  --color-text-muted:      hsl(0, 0%, 22%);
+  --color-text-subtle:     hsl(0, 0%, 25%);
+  --color-text-hint:       hsl(0, 0%, 28%);
+  --color-text-placeholder:hsl(0, 0%, 35%);
+
+  /* Feedback */
+  --color-danger:          hsl(0, 55%, 45%);
+  --color-danger-hover:    hsl(0, 60%, 38%);
+  --color-danger-bg:       hsl(0, 15%, 93%);
+  --color-warning-text:    hsl(35, 70%, 35%);
+  --color-warning-bg:      hsl(42, 50%, 95%);
+  --color-warning-border:  hsl(42, 30%, 85%);
+  --color-success-bg:      #f0fdf4;
+  --color-success-text:    #166534;
+  --color-success-border:  #bbf7d0;
+  --color-error-bg:        #fef2f2;
+  --color-error-text:      #991b1b;
+  --color-error-border:    #fecaca;
+
+  /* Shadows */
+  --shadow-card:           0 2px 12px hsla(40, 15%, 50%, 0.08);
+  --shadow-dialog:         0 8px 30px hsla(40, 15%, 30%, 0.12);
+
+  /* Radii */
+  --radius-sm:             6px;
+  --radius-md:             8px;
+  --radius-lg:             12px;
+  --radius-xl:             14px;
+  --radius-full:           9999px;
+
+  /* Fonts */
+  --font-body:             "iA Writer Quattro S", "Noto Serif SC", Georgia, "Times New Roman", serif;
+  --font-mono:             "iA Writer Mono V", "JetBrains Mono", "SF Mono", "Cascadia Code", monospace;
+}
+
+/* ─────────────────────────────────────────────
+   2. Reset, base elements & animations
+   ───────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-family: var(--font-body);
+  color-scheme: light;
+  font-size: 16px;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
 
 /* Scrollbar */
-::-webkit-scrollbar{width:6px;height:6px}
-::-webkit-scrollbar-track{background:transparent}
-::-webkit-scrollbar-thumb{background:#3f3f46;border-radius:3px}
-::-webkit-scrollbar-thumb:hover{background:#52525b}
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
 
-/* Wiki content (markdown) */
-.wiki-content h1{font-size:1.75rem;font-weight:700;margin:1.5rem 0 0.75rem;color:#fff}
-.wiki-content h2{font-size:1.35rem;font-weight:600;margin:1.25rem 0 0.5rem;color:#e4e4e7;padding-bottom:0.25rem;border-bottom:1px solid #27272a}
-.wiki-content h3{font-size:1.1rem;font-weight:600;margin:1rem 0 0.5rem;color:#d4d4d8}
-.wiki-content p{margin:0.5rem 0;color:#a1a1aa}
-.wiki-content a{color:#60a5fa;text-decoration:none}
-.wiki-content a:hover{color:#93bbfd;text-decoration:underline}
-.wiki-content code{background:#18181b;padding:0.15em 0.4em;border-radius:0.25rem;font-size:0.875em;color:#f48771}
-.wiki-content pre{background:#18181b;padding:1rem;border-radius:0.5rem;overflow-x:auto;margin:0.75rem 0;border:1px solid #27272a}
-.wiki-content pre code{background:transparent;padding:0;color:#d4d4d8}
-.wiki-content blockquote{border-left:3px solid #3b82f6;padding-left:1rem;margin:0.75rem 0;color:#a1a1aa}
-.wiki-content ul,.wiki-content ol{padding-left:1.5rem;margin:0.5rem 0}
-.wiki-content li{color:#a1a1aa;margin:0.25rem 0}
-.wiki-content table{border-collapse:collapse;width:100%;margin:0.75rem 0}
-.wiki-content th,.wiki-content td{border:1px solid #27272a;padding:0.5rem 0.75rem;text-align:left;font-size:0.875rem}
-.wiki-content th{background:#18181b;color:#e4e4e7;font-weight:600}
-.wiki-content td{color:#a1a1aa}
-.wiki-content img{max-width:100%;border-radius:0.5rem;margin:0.5rem 0}
-.wiki-content hr{border:0;border-top:1px solid #27272a;margin:1.5rem 0}
-.wiki-content sup a{font-size:0.75rem;color:#60a5fa}
-.wiki-content .footnote-ref{display:inline-block;background:#1e3a5f;color:#60a5fa;padding:0 4px;border-radius:3px;font-size:0.75rem;margin:0 1px}
-.wiki-content .footnotes{margin-top:2rem;padding-top:1rem;border-top:1px solid #27272a;font-size:0.8rem}
-.wiki-content .footnotes li{color:#71717a}
-.wiki-content .footnotes a{color:#60a5fa}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
 
-/* Animations */
-@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-.animate-in{animation:fadeIn 0.2s ease-out}
+::-webkit-scrollbar-thumb {
+  background: hsl(0, 0%, 70%);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(0, 0%, 55%);
+}
 
 /* File input */
-input[type="file"]{display:none}
+input[type="file"] {
+  display: none;
+}
 
-/* Transitions */
-.transition-all{transition-property:all;transition-timing-function:cubic-bezier(0.4,0,0.2,1)}
-.transition-colors{transition-property:color,background-color,border-color;transition-timing-function:cubic-bezier(0.4,0,0.2,1)}
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.animate-in {
+  animation: fadeIn 0.2s ease-out;
+}
+
+/* Transition helpers */
+.transition-all {
+  transition-property: all;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.transition-colors {
+  transition-property: color, background-color, border-color;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ─────────────────────────────────────────────
+   3. App shell layout
+   These styles do NOT depend on Tailwind CDN.
+   ───────────────────────────────────────────── */
+
+/* Outer wrapper — full-height flex row */
+.app-layout {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* Left sidebar — fixed width, flex column */
+.app-sidebar {
+  width: 16rem;
+  min-width: 16rem;       /* prevent shrinking below 16rem */
+  display: flex;
+  flex-direction: column;
+  border-right-width: 1px;
+  border-right-style: solid;
+}
+
+/* Main content area — fills remaining space */
+.app-main {
+  flex: 1 1 0%;
+  min-width: 0;           /* allow flex child to shrink below content size */
+  overflow-y: auto;
+}
+
+/* Sidebar header (logo area) */
+.sidebar-header {
+  padding: 1rem;
+  border-bottom-width: 1px;
+  border-bottom-style: solid;
+}
+
+/* Sidebar navigation — flex column, fills remaining sidebar height */
+.sidebar-nav {
+  flex: 1 1 0%;
+  overflow-y: auto;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Nav items — full-width block links */
+.sidebar-nav .nav-item {
+  width: 100%;
+}
+
+/* ─────────────────────────────────────────────
+   4. Wiki content (markdown rendering)
+   ───────────────────────────────────────────── */
+
+.wiki-content {
+  max-width: 42rem;
+}
+
+.wiki-content h1 {
+  font-size: 1.6rem;
+  font-weight: 700;
+  margin: 2rem 0 0.75rem;
+  color: var(--color-text-heading);
+  letter-spacing: -0.01em;
+}
+
+.wiki-content h2 {
+  font-size: 1.3rem;
+  font-weight: 600;
+  margin: 1.75rem 0 0.5rem;
+  color: hsl(0, 0%, 8%);
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.wiki-content h3 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 1.25rem 0 0.4rem;
+  color: hsl(0, 0%, 10%);
+}
+
+.wiki-content h4 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 1rem 0 0.3rem;
+  color: var(--color-text-body);
+}
+
+.wiki-content p {
+  margin: 0.65rem 0;
+  color: var(--color-text-body);
+}
+
+.wiki-content a {
+  color: hsl(129, 32%, 35%);
+  text-decoration: none;
+  border-bottom: 1px solid var(--color-accent-border);
+}
+
+.wiki-content a:hover {
+  color: hsl(129, 32%, 25%);
+  border-bottom-color: hsl(129, 32%, 35%);
+}
+
+.wiki-content strong {
+  color: var(--color-text);
+  font-weight: 700;
+}
+
+.wiki-content em {
+  font-style: italic;
+  color: hsl(0, 0%, 14%);
+}
+
+.wiki-content code {
+  background: var(--color-bg-code);
+  padding: 0.15em 0.4em;
+  border-radius: 3px;
+  font-size: 0.875em;
+  color: var(--color-text-dim);
+  font-family: var(--font-mono);
+}
+
+.wiki-content pre {
+  background: var(--color-bg-pre);
+  padding: 1.25rem;
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  margin: 0.85rem 0;
+  border: 1px solid var(--color-border-pre);
+}
+
+.wiki-content pre code {
+  background: transparent;
+  padding: 0;
+  color: hsl(0, 0%, 14%);
+  font-size: 0.85em;
+}
+
+.wiki-content blockquote {
+  border-left: 3px solid hsl(129, 25%, 65%);
+  padding: 0.4rem 0 0.4rem 1rem;
+  margin: 0.85rem 0;
+  color: hsl(0, 0%, 26%);
+  font-style: italic;
+}
+
+.wiki-content ul,
+.wiki-content ol {
+  padding-left: 1.75rem;
+  margin: 0.6rem 0;
+}
+
+.wiki-content li {
+  color: var(--color-text-body);
+  margin: 0.3rem 0;
+}
+
+.wiki-content li::marker {
+  color: var(--color-text-placeholder);
+}
+
+.wiki-content table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.85rem 0;
+  font-size: 0.9rem;
+}
+
+.wiki-content th,
+.wiki-content td {
+  border: 1px solid var(--color-border-light);
+  padding: 0.55rem 0.85rem;
+  text-align: left;
+}
+
+.wiki-content th {
+  background: var(--color-bg-table-head);
+  color: hsl(0, 0%, 10%);
+  font-weight: 700;
+}
+
+.wiki-content td {
+  color: hsl(0, 0%, 14%);
+}
+
+.wiki-content tr:nth-child(even) td {
+  background: var(--color-bg-stripe);
+}
+
+.wiki-content img {
+  max-width: 100%;
+  border-radius: var(--radius-sm);
+  margin: 0.6rem 0;
+}
+
+.wiki-content hr {
+  border: 0;
+  border-top: 1px solid var(--color-border-light);
+  margin: 2rem 0;
+}
+
+.wiki-content sup a {
+  font-size: 0.75rem;
+  color: hsl(129, 32%, 35%);
+}
+
+.wiki-content .footnote-ref {
+  display: inline-block;
+  background: var(--color-accent-light);
+  color: hsl(129, 32%, 32%);
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 0.75rem;
+  margin: 0 1px;
+}
+
+.wiki-content .footnotes {
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-border-light);
+  font-size: 0.8rem;
+}
+
+.wiki-content .footnotes li {
+  color: var(--color-text-placeholder);
+}
+
+.wiki-content .footnotes a {
+  color: hsl(129, 32%, 35%);
+}
+
+.wiki-content .task-list-item {
+  list-style-type: none;
+  margin-left: -1.25rem;
+}
+
+.wiki-content .task-list-item input[type="checkbox"] {
+  margin-right: 0.4rem;
+  accent-color: var(--color-accent);
+}
+
+/* ─────────────────────────────────────────────
+   5. Component classes
+   ───────────────────────────────────────────── */
+
+/* Cards */
+.card {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.card:hover {
+  box-shadow: var(--shadow-card);
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  border-radius: var(--radius-md);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border: 1px solid transparent;
+}
+
+.btn-primary {
+  background: var(--color-accent);
+  color: #fff;
+  border-color: var(--color-accent);
+}
+
+.btn-primary:hover {
+  background: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
+}
+
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-danger {
+  background: hsl(129, 5%, 97%);
+  color: hsl(0, 60%, 45%);
+  border-color: hsl(0, 30%, 88%);
+}
+
+.btn-danger:hover {
+  background: hsl(0, 40%, 95%);
+  color: hsl(0, 65%, 40%);
+}
+
+.btn-warning {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+  border-color: var(--color-warning-border);
+}
+
+.btn-warning:hover {
+  background: hsl(42, 50%, 90%);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--color-text-placeholder);
+  border-color: transparent;
+}
+
+.btn-ghost:hover {
+  color: hsl(0, 0%, 15%);
+  background: hsl(0, 0%, 92%);
+}
+
+/* Tag filter buttons */
+.btn-tag {
+  background: hsl(42, 15%, 93%);
+  color: var(--color-text-placeholder);
+  border-color: var(--color-border-light);
+}
+
+.btn-tag:hover,
+.btn-tag.active {
+  background: hsl(0, 0%, 82%);
+  color: hsl(0, 0%, 10%);
+}
+
+.btn-tag-pending {
+  background: hsl(42, 50%, 93%);
+  color: var(--color-warning-text);
+  border-color: hsl(42, 30%, 82%);
+}
+
+.btn-tag-pending:hover {
+  background: hsl(42, 50%, 88%);
+}
+
+.btn-tag-approved {
+  background: hsl(129, 20%, 92%);
+  color: hsl(129, 40%, 30%);
+  border-color: hsl(129, 20%, 80%);
+}
+
+.btn-tag-approved:hover {
+  background: hsl(129, 20%, 86%);
+}
+
+.btn-tag-rejected {
+  background: var(--color-danger-bg);
+  color: hsl(0, 40%, 40%);
+  border-color: hsl(0, 15%, 85%);
+}
+
+.btn-tag-rejected:hover {
+  background: hsl(0, 15%, 87%);
+}
+
+/* Action buttons */
+.btn-delete-icon {
+  color: hsl(0, 40%, 50%);
+}
+
+.btn-delete-icon:hover {
+  color: var(--color-danger-hover);
+}
+
+.btn-danger-filled {
+  background: var(--color-danger);
+  border-color: var(--color-danger);
+  color: #fff;
+}
+
+.btn-danger-filled:hover {
+  background: var(--color-danger-hover);
+  border-color: var(--color-danger-hover);
+}
+
+/* Inputs */
+.input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  color: hsl(0, 0%, 15%);
+  font-size: 0.875rem;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.input:focus {
+  border-color: var(--color-accent-focus);
+  box-shadow: 0 0 0 3px hsla(129, 32%, 55%, 0.1);
+}
+
+.input::placeholder {
+  color: hsl(0, 0%, 55%);
+}
+
+.input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Mono textarea */
+.textarea-mono {
+  font-family: var(--font-mono);
+}
+
+/* Status badges */
+.badge {
+  padding: 0.15rem 0.55rem;
+  border-radius: var(--radius-full);
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.badge-pending {
+  background: hsl(42, 40%, 90%);
+  color: hsl(35, 65%, 35%);
+}
+
+.badge-approved {
+  background: var(--color-accent-bg);
+  color: hsl(129, 40%, 28%);
+}
+
+.badge-rejected {
+  background: hsl(0, 15%, 92%);
+  color: hsl(0, 40%, 42%);
+}
+
+/* Tags */
+.tag {
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  background: hsl(42, 15%, 92%);
+  border-radius: var(--radius-full);
+  font-size: 0.75rem;
+  color: var(--color-text-placeholder);
+}
+
+/* Dialog */
+.dialog-overlay {
+  background: hsla(0, 0%, 0%, 0.2);
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dialog-box {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  padding: 1.5rem;
+  max-width: 28rem;
+  width: 100%;
+  box-shadow: var(--shadow-dialog);
+}
+
+.dialog-title {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--color-text-body);
+  margin-bottom: 0.75rem;
+}
+
+/* Upload dropzone */
+.upload-zone {
+  border: 2px dashed var(--color-border-dashed);
+  border-radius: 10px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.78rem;
+  color: hsl(0, 0%, 45%);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.upload-zone:hover {
+  border-color: var(--color-accent-focus);
+  color: hsl(129, 32%, 40%);
+}
+
+/* Progress bar */
+.progress-track {
+  height: 3px;
+  background: var(--color-border);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--color-accent);
+  border-radius: var(--radius-full);
+  transition: width 0.2s ease;
+}
+
+/* Code blocks (non-wiki) */
+.code-block {
+  background: var(--color-bg-pre);
+  padding: 1rem;
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  font-size: 0.85rem;
+  border: 1px solid var(--color-border-pre);
+  font-family: var(--font-mono);
+  color: hsl(0, 0%, 14%);
+}
+
+/* Nav item */
+.nav-item {
+  display: block;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.875rem;
+  color: hsl(0, 0%, 10%);
+  transition: all 0.12s ease;
+}
+
+.nav-item:hover {
+  background: var(--color-bg-hover);
+  color: hsl(0, 0%, 10%);
+}
+
+.nav-item.active {
+  background: var(--color-bg-active);
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+/* Chat bubbles */
+.chat-user {
+  background: var(--color-accent);
+  color: #fff;
+  padding: 0.5rem 1rem;
+  border-radius: 12px 12px 4px 12px;
+  max-width: 42rem;
+  font-size: 0.875rem;
+}
+
+.chat-bot {
+  background: hsl(42, 15%, 92%);
+  color: hsl(0, 0%, 14%);
+  padding: 0.5rem 1rem;
+  border-radius: 12px 12px 12px 4px;
+  max-width: 42rem;
+  font-size: 0.875rem;
+}
+
+.chat-error {
+  background: hsl(0, 25%, 94%);
+  color: hsl(0, 50%, 40%);
+  padding: 0.5rem 1rem;
+  border-radius: 12px;
+  font-size: 0.85rem;
+}
+
+/* Status row */
+.status-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.875rem;
+}
+
+.status-label {
+  color: hsl(0, 0%, 38%);
+}
+
+.status-value {
+  color: hsl(0, 0%, 14%);
+}
+
+.status-ok {
+  color: hsl(129, 32%, 42%);
+}
+
+/* Loading spinner */
+.spinner {
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Toast notifications */
+.toast-info {
+  background: var(--color-bg-sidebar);
+  color: hsl(0, 0%, 8%);
+  border: 1px solid var(--color-border);
+}
+
+.toast-success {
+  background: var(--color-success-bg);
+  color: var(--color-success-text);
+  border: 1px solid var(--color-success-border);
+}
+
+.toast-error {
+  background: var(--color-error-bg);
+  color: var(--color-error-text);
+  border: 1px solid var(--color-error-border);
+}
+
+/* ─────────────────────────────────────────────
+   6. Utilities
+   ───────────────────────────────────────────── */
+
+/* Layout */
+.sidebar {
+  background: var(--color-bg-sidebar);
+}
+
+.border-default {
+  border-color: var(--color-border);
+}
+
+/* Page title */
+.page-title {
+  color: var(--color-text-heading);
+  letter-spacing: -0.01em;
+}
+
+/* Text utilities */
+.text-secondary {
+  color: var(--color-text-dim);
+}
+
+.text-muted {
+  color: var(--color-text-muted);
+}
+
+.text-subtle {
+  color: var(--color-text-subtle);
+}
+
+.text-placeholder {
+  color: var(--color-text-hint);
+}
+
+/* Sidebar tabs */
+.tab-btn {
+  border-bottom: 2px solid transparent;
+  color: var(--color-text-muted);
+}
+
+.tab-btn:hover {
+  color: hsl(0, 0%, 10%);
+}
+
+.tab-btn-active {
+  border-bottom-color: var(--color-accent);
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+/* Document list */
+.doc-link {
+  color: var(--color-text-body);
+}
+
+.doc-link:hover {
+  background: var(--color-bg-active);
+}
+
+.doc-link-active {
+  background: var(--color-bg-active);
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+/* Misc */
+.badge-count {
+  background: var(--color-accent);
+}
+
+.extract-preview {
+  background: hsl(42, 20%, 94%);
+  color: hsl(0, 0%, 14%);
+}
+
+.back-link {
+  color: hsl(0, 0%, 20%);
+}
+
+.back-link:hover {
+  color: hsl(0, 0%, 10%);
+}
+
+.logo {
+  color: var(--color-text-body);
+}
+
+.text-danger-title {
+  color: hsl(0, 50%, 42%);
+}
