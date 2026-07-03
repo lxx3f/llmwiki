@@ -1,9 +1,9 @@
 import os
 import sys
+import tempfile
 
-os.environ["DATABASE_URL"] = "postgresql://postgres:postgres@localhost:5434/llmwiki_test"
-os.environ["SINGLE_USER_ID"] = "00000000-0000-0000-0000-000000000001"
-os.environ["STORAGE_ROOT"] = "./data/test_files/"
+os.environ["WIKI_ROOT"] = os.path.join(tempfile.gettempdir(), "llmwiki_test_data")
+os.environ["SINGLE_USER_ID"] = "local"
 os.environ["OLLAMA_URL"] = "http://localhost:11434"
 os.environ["LOGFIRE_TOKEN"] = ""
 os.environ["SENTRY_DSN"] = ""

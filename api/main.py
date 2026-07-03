@@ -1,179 +1,86 @@
-import asyncio
+"""LLM Wiki — minimal web display and review layer.
+
+The Agent operates directly on the filesystem + Git.
+This server only renders wiki content (read-only) and provides
+a review UI for accepting/rejecting Agent-proposed changes.
+"""
+
 import logging
 import os
-from contextlib import asynccontextmanager
+import subprocess
+from pathlib import Path
 
 # ── Fix broken SSL_CERT_FILE on conda/Windows ──
 _ssl_cert = os.environ.get("SSL_CERT_FILE", "")
 if not _ssl_cert or not os.path.isfile(_ssl_cert):
     try:
         import certifi
+
         os.environ["SSL_CERT_FILE"] = certifi.where()
     except ImportError:
-        pass  # certifi not available, leave as-is
+        pass
 
-import asyncpg
-import logfire
-import sentry_sdk
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Request, Query
+from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from config import settings
-
 logger = logging.getLogger(__name__)
 
-if settings.SENTRY_DSN:
-    sentry_sdk.init(
-        dsn=settings.SENTRY_DSN,
-        send_default_pii=True,
-        traces_sample_rate=0.1,
-        environment=settings.STAGE,
-    )
+# ── Config ──────────────────────────────────────────────────
 
-if settings.LOGFIRE_TOKEN:
-    logfire.configure(token=settings.LOGFIRE_TOKEN, service_name="llmwiki-api")
-    logfire.instrument_asyncpg()
-
-from routes.health import router as health_router
-from routes.knowledge_bases import router as knowledge_bases_router
-from routes.documents import router as documents_router
-from routes.me import router as me_router
-from routes.tags import router as tags_router
-from routes.extraction import router as extraction_router
-from routes.files import router as files_router
-from infra.tus import router as tus_router, cleanup_stale_uploads
+WIKI_ROOT = Path(os.getenv("WIKI_ROOT", "./wiki_data/")).resolve()
 
 
-async def _recover_stuck_documents(pool: asyncpg.Pool, ocr_service):
-    rows = await pool.fetch(
-        "SELECT id::text, user_id::text FROM documents "
-        "WHERE status IN ('pending', 'processing') AND NOT archived"
-    )
-    for row in rows:
-        logger.info("Recovering stuck document %s", row["id"][:8])
-        asyncio.create_task(ocr_service.process_document(row["id"], row["user_id"]))
-
-
-async def _ensure_single_user(pool: asyncpg.Pool) -> str:
-    """Ensure the single user row exists in the users table. Returns the effective user ID."""
-    user_id = settings.SINGLE_USER_ID
-    existing = await pool.fetchrow("SELECT id FROM users WHERE email = $1", "local@llmwiki")
-    if existing:
-        user_id = existing["id"]
-        logger.info("Found existing single user: %s", user_id)
-    else:
-        await pool.execute(
-            "INSERT INTO users (id, email, display_name, onboarded) "
-            "VALUES ($1::uuid, $2, $2, true)",
-            user_id, "local@llmwiki",
-        )
-        logger.info("Created single user: %s", user_id)
-    return user_id
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
+def _git(*args: str, cwd: str | None = None) -> subprocess.CompletedProcess | None:
+    """Run a git command in WIKI_ROOT. Returns None on timeout or unexpected error."""
+    workdir = str(cwd or WIKI_ROOT)
     try:
-        pool = await asyncpg.create_pool(settings.DATABASE_URL, min_size=2, max_size=10)
-    except (OSError, asyncpg.exceptions.PostgresError) as e:
-        logger.critical(
-            "❌ 无法连接到 PostgreSQL 数据库，请检查：\n"
-            "  1. Docker 容器是否已启动？运行: docker compose up -d\n"
-            "  2. DATABASE_URL 是否正确？当前: %s\n"
-            "  3. 端口 5432 是否被占用？运行: docker ps\n"
-            "  原始错误: %s",
-            settings.DATABASE_URL, e,
+        return subprocess.run(
+            ["git"] + list(args),
+            cwd=workdir,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
         )
-        raise SystemExit(1) from e
-
-    app.state.pool = pool
-
-    # Ensure single user exists
-    try:
-        app.state.effective_user_id = await _ensure_single_user(pool)
-    except Exception as e:
-        logger.critical(
-            "❌ 初始化用户数据失败: %s\n请检查数据库迁移是否已执行。", e
-        )
-        await pool.close()
-        raise SystemExit(1) from e
-
-    # Local storage (always available)
-    from services.local_storage import LocalStorageService
-    storage = LocalStorageService()
-    app.state.storage = storage
-
-    # OCR service (requires converter if processing office docs)
-    ocr_service = None
-    from services.ocr import OCRService
-    ocr_service = OCRService(storage, pool)
-    app.state.ocr_service = ocr_service
-
-    cleanup_task = asyncio.create_task(cleanup_stale_uploads())
-
-    if ocr_service:
-        await _recover_stuck_documents(pool, ocr_service)
-
-    yield
-
-    cleanup_task.cancel()
-    await pool.close()
+    except (subprocess.TimeoutExpired, OSError) as e:
+        logger.warning("Git command failed: git %s — %s", " ".join(args), e)
+        return None
 
 
-app = FastAPI(title="LLM Wiki API", lifespan=lifespan)
+# ── App ──────────────────────────────────────────────────────
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[settings.APP_URL],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=[
-        "Location", "Upload-Offset", "Upload-Length",
-        "Tus-Resumable", "Tus-Version", "Tus-Max-Size", "Tus-Extension",
-        "X-Document-Id",
-    ],
-)
+app = FastAPI(title="LLM Wiki")
 
-if settings.LOGFIRE_TOKEN:
-    logfire.instrument_fastapi(app)
-
-# API routes
-app.include_router(health_router)
-app.include_router(knowledge_bases_router)
-app.include_router(documents_router)
-app.include_router(me_router)
-app.include_router(tags_router)
-app.include_router(extraction_router)
-app.include_router(files_router)
-app.include_router(tus_router)
-
-# Static files (CSS, JS, images)
 app.mount("/static", StaticFiles(directory="static"), name="static")
-
-# ── Frontend routes (Jinja2 templates) ──
 
 templates = Jinja2Templates(directory="templates")
 
 
-async def _get_kb_list(pool):
-    rows = await pool.fetch(
-        "SELECT kb.id, kb.user_id, kb.name, kb.slug, kb.description, kb.created_at, kb.updated_at, "
-        "  (SELECT COUNT(*) FROM documents d "
-        "   WHERE d.knowledge_base_id = kb.id AND d.path NOT LIKE '/wiki/%%' AND NOT d.archived) AS source_count, "
-        "  (SELECT COUNT(*) FROM documents d "
-        "   WHERE d.knowledge_base_id = kb.id AND d.path LIKE '/wiki/%%' AND NOT d.archived) AS wiki_page_count "
-        "FROM knowledge_bases kb ORDER BY kb.updated_at DESC"
-    )
-    return [dict(r) for r in rows]
+# ── Wiki browsing ────────────────────────────────────────────
+
+
+@app.get("/favicon.ico")
+async def favicon():
+    return FileResponse("static/favicon.ico")
 
 
 @app.get("/", response_class=HTMLResponse)
 async def home_page(request: Request):
-    kbs = await _get_kb_list(request.app.state.pool)
+    """List knowledge bases (directories that contain a wiki/ subdir)."""
+    kbs = []
+    if WIKI_ROOT.exists():
+        for d in sorted(WIKI_ROOT.iterdir()):
+            if d.is_dir() and (d / "wiki").is_dir():
+                kbs.append({
+                    "slug": d.name,
+                    "name": d.name,
+                    "wiki_count": len(list((d / "wiki").rglob("*.md"))),
+                    "source_count": len(
+                        [sd for sd in (d / "sources").iterdir() if sd.is_dir()]
+                    ) if (d / "sources").exists() else 0,
+                })
     return templates.TemplateResponse("index.html", {
         "request": request,
         "kbs": kbs,
@@ -181,106 +88,153 @@ async def home_page(request: Request):
     })
 
 
-@app.get("/wikis/{slug}", response_class=HTMLResponse)
-async def wiki_detail_page(request: Request, slug: str, doc: str = None, page: str = None):
-    pool = request.app.state.pool
-    kb = await pool.fetchrow(
-        "SELECT id, user_id, name, slug FROM knowledge_bases WHERE slug = $1", slug
-    )
-    if not kb:
+@app.get("/wiki/{slug}", response_class=HTMLResponse)
+async def wiki_detail_page(
+    request: Request,
+    slug: str,
+    page: str = Query(None),
+):
+    """Browse a wiki — show directory tree and render selected .md file."""
+    kb_dir = WIKI_ROOT / slug
+    if not kb_dir.is_dir() or not (kb_dir / "wiki").is_dir():
         return HTMLResponse("Knowledge base not found", status_code=404)
 
-    kb = dict(kb)
+    wiki_dir = kb_dir / "wiki"
 
-    # Get documents list
-    all_docs = await pool.fetch(
-        "SELECT id, filename, title, path, file_type, tags, status "
-        "FROM documents WHERE knowledge_base_id = $1 AND NOT archived "
-        "ORDER BY path, filename",
-        kb["id"],
-    )
-    all_docs = [dict(d) for d in all_docs]
-    wiki_docs = [d for d in all_docs if d["path"].startswith("/wiki/")]
-    source_docs = [d for d in all_docs if not d["path"].startswith("/wiki/")]
+    # Build file tree
+    wiki_files = []
+    for f in sorted(wiki_dir.rglob("*.md")):
+        rel = str(f.relative_to(wiki_dir)).replace("\\", "/")
+        wiki_files.append({
+            "path": rel,
+            "name": f.stem,
+            "dir": str(f.parent.relative_to(wiki_dir)).replace("\\", "/").replace(".", ""),
+        })
 
-    # Active document
-    active_doc = None
-    if doc:
-        active_doc = await pool.fetchrow(
-            "SELECT id, filename, title, path, file_type, tags, content, page_count "
-            "FROM documents WHERE id = $1 AND NOT archived", doc
-        )
-        active_doc = dict(active_doc) if active_doc else None
-    elif page:
-        # page param looks like "/wiki/concepts/something.md"
-        p = page if page.startswith("/") else "/" + page
-        if "/" in p:
-            dpath = "/" + p[1:].rsplit("/", 1)[0] + "/" if len(p.split("/")) > 2 else "/wiki/"
-            fname = p.rsplit("/", 1)[-1]
-        else:
-            dpath = "/wiki/"
-            fname = p
-        active_doc = await pool.fetchrow(
-            "SELECT id, filename, title, path, file_type, tags, content, page_count "
-            "FROM documents WHERE knowledge_base_id = $1 AND path = $2 AND filename = $3 AND NOT archived",
-            kb["id"], dpath, fname,
-        )
-        active_doc = dict(active_doc) if active_doc else None
+    # Build source list
+    sources = []
+    sources_dir = kb_dir / "sources"
+    if sources_dir.exists():
+        for d in sorted(sources_dir.iterdir()):
+            if d.is_dir():
+                files = [f.name for f in d.iterdir() if f.is_file()]
+                sources.append({"id": d.name, "name": d.name, "files": files})
 
-    # Markdown rendering (server-side)
-    if active_doc and active_doc.get("content"):
+    # Active page content
+    active = None
+    target = page.lstrip("/") if page else "index.md"
+    target_path = wiki_dir / target
+    if target_path.exists() and target_path.suffix == ".md":
+        content = target_path.read_text(encoding="utf-8", errors="replace")
         import mistune
+
         md = mistune.create_markdown(plugins=[
             "table", "strikethrough", "footnotes", "task_lists", "url",
         ])
-        active_doc["content"] = md(active_doc["content"])
+        active = {
+            "path": target,
+            "name": target_path.stem,
+            "content": md(content),
+        }
 
     return templates.TemplateResponse("wiki_detail.html", {
         "request": request,
-        "kb": kb,
-        "wiki_docs": wiki_docs,
-        "source_docs": source_docs,
-        "active_doc": active_doc,
+        "kb": {"slug": slug, "name": slug},
+        "wiki_files": wiki_files,
+        "source_docs": sources,
+        "active_doc": active,
         "active_page": "home",
     })
 
 
-@app.get("/tags", response_class=HTMLResponse)
-async def tags_page(request: Request):
-    return templates.TemplateResponse("tags.html", {
+# ── Review (Git branches) ────────────────────────────────────
+
+
+@app.get("/review", response_class=HTMLResponse)
+async def review_list(request: Request):
+    """List all ingest/reingest branches pending review."""
+    result = _git("branch", "-a")
+    branches = []
+    if result and result.returncode == 0:
+        for line in result.stdout.splitlines():
+            name = line.strip().lstrip("*").strip()
+            if name.startswith("remotes/"):
+                continue
+            if name.startswith("ingest/") or name.startswith("reingest/"):
+                # Get commit message
+                msg_result = _git("log", "--oneline", "-1", name)
+                msg = msg_result.stdout.strip() if (msg_result and msg_result.returncode == 0) else ""
+                # Count changed files
+                diff_result = _git("diff", "--stat", f"master...{name}")
+                stat = diff_result.stdout.strip().split("\n")[-1] if (diff_result and diff_result.returncode == 0) else ""
+                branches.append({
+                    "name": name,
+                    "message": msg,
+                    "stat": stat,
+                })
+
+    return templates.TemplateResponse("review.html", {
         "request": request,
-        "active_page": "tags",
+        "branches": branches,
+        "active_page": "review",
     })
 
 
-@app.get("/extractions", response_class=HTMLResponse)
-async def extractions_page(request: Request):
-    return templates.TemplateResponse("extraction.html", {
+@app.get("/review/{branch:path}", response_class=HTMLResponse)
+async def review_detail(request: Request, branch: str):
+    """Show diff for a review branch."""
+    # Get commit message
+    msg_result = _git("log", "--oneline", "-1", branch)
+    msg = msg_result.stdout.strip() if (msg_result and msg_result.returncode == 0) else "(no message)"
+
+    # Get diff against master
+    diff_result = _git("diff", f"master...{branch}")
+    diff_text = diff_result.stdout if (diff_result and diff_result.returncode == 0) else "(diff failed)"
+
+    # Also try to show the diff stat
+    stat_result = _git("diff", "--stat", f"master...{branch}")
+    stat_text = stat_result.stdout if (stat_result and stat_result.returncode == 0) else ""
+
+    return templates.TemplateResponse("review_detail.html", {
         "request": request,
-        "active_page": "extractions",
+        "branch": branch,
+        "message": msg,
+        "stat": stat_text,
+        "diff": diff_text,
+        "active_page": "review",
     })
 
 
-@app.get("/extractions/{task_id}", response_class=HTMLResponse)
-async def extraction_review_page(request: Request, task_id: str):
-    pool = request.app.state.pool
-    task = await pool.fetchrow(
-        "SELECT id, document_id, status, proposed_content, proposed_tags, reviewed_at, created_at "
-        "FROM extraction_tasks WHERE id = $1", task_id
-    )
-    return templates.TemplateResponse("extraction_review.html", {
-        "request": request,
-        "task": dict(task) if task else None,
-        "active_page": "extractions",
-    })
+@app.post("/review/{branch:path}/approve")
+async def review_approve(branch: str):
+    """Approve: merge the branch into master."""
+    r = _git("checkout", "master")
+    if not r or r.returncode != 0:
+        err = r.stderr if r else "git not available"
+        return {"ok": False, "error": f"checkout master failed: {err}"}
+
+    r = _git("merge", branch)
+    if not r or r.returncode != 0:
+        _git("merge", "--abort")
+        _git("checkout", "master")
+        err = r.stderr if r else "git not available"
+        return {"ok": False, "error": f"merge failed: {err}"}
+
+    _git("branch", "-d", branch)
+    return {"ok": True, "message": f"Merged {branch} into master"}
 
 
-@app.get("/qa", response_class=HTMLResponse)
-async def qa_page(request: Request):
-    return templates.TemplateResponse("qa.html", {
-        "request": request,
-        "active_page": "qa",
-    })
+@app.post("/review/{branch:path}/reject")
+async def review_reject(branch: str):
+    """Reject: delete the branch without merging."""
+    r = _git("branch", "-D", branch)
+    if not r or r.returncode != 0:
+        err = r.stderr if r else "git not available"
+        return {"ok": False, "error": f"delete failed: {err}"}
+    return {"ok": True, "message": f"Deleted {branch}"}
+
+
+# ── Settings ─────────────────────────────────────────────────
 
 
 @app.get("/settings", response_class=HTMLResponse)
@@ -288,26 +242,5 @@ async def settings_page(request: Request):
     return templates.TemplateResponse("settings.html", {
         "request": request,
         "active_page": "settings",
-        "mcp_url": settings.MCP_URL,
-        "storage_root": settings.STORAGE_ROOT,
-        "ollama_url": settings.OLLAMA_URL,
-        "user_id": request.app.state.effective_user_id,
+        "wiki_root": str(WIKI_ROOT),
     })
-
-
-@app.get("/v1/search/chunks")
-async def search_chunks(request: Request, kb_id: str, q: str, limit: int = 10):
-    """Simple chunk search endpoint for the QA page."""
-    pool = request.app.state.pool
-    rows = await pool.fetch(
-        "SELECT dc.content, dc.page, d.filename, d.title "
-        "FROM document_chunks dc "
-        "JOIN documents d ON dc.document_id = d.id "
-        "WHERE dc.knowledge_base_id = $1 "
-        "  AND dc.content &@~ $2 "
-        "  AND NOT d.archived "
-        "ORDER BY pgroonga_score(dc.tableoid, dc.ctid) DESC "
-        "LIMIT $3",
-        kb_id, q, limit,
-    )
-    return [dict(r) for r in rows]

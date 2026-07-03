@@ -2,139 +2,32 @@
 {% block title %}LLM Wiki - 知识库{% endblock %}
 {% block content %}
 <div class="max-w-5xl mx-auto p-8">
-    <div class="flex items-center justify-between mb-8">
-        <h1 class="text-2xl font-bold page-title">知识库</h1>
-        <button onclick="showCreateDialog()" class="btn btn-primary">+ 新建知识库</button>
-    </div>
+    <h1 class="text-2xl font-bold mb-8 page-title">知识库</h1>
 
     <div id="kb-list" class="grid gap-4 md:grid-cols-2">
         {% for kb in kbs %}
-        <div class="relative group/card card transition-all">
-            <a href="/wikis/{{ kb.slug }}" class="block p-5 hover:bg-gray-50/60 transition-all">
-                <div class="flex items-start justify-between mb-2">
-                    <h3 class="font-semibold group-hover/card:opacity-75 transition-opacity page-title">{{ kb.name }}</h3>
-                    <span class="text-xs text-subtle">{{ kb.updated_at.strftime('%Y-%m-%d') if kb.updated_at else '' }}</span>
-                </div>
-                <p class="text-sm mb-3 text-secondary">{{ kb.description or '暂无描述' }}</p>
-                <div class="flex gap-4 text-xs text-subtle">
-                    <span>📄 {{ kb.source_count or 0 }} 文档</span>
-                    <span>📝 {{ kb.wiki_page_count or 0 }} wiki</span>
-                </div>
-            </a>
-            <button onclick="confirmDeleteKB(event, '{{ kb.id }}', '{{ kb.name | e }}')"
-                    class="absolute top-2 right-2 opacity-0 group-hover/card:opacity-100 px-2 py-0.5 text-xs rounded transition-all btn-delete-icon"
-                    title="删除知识库">✕</button>
-        </div>
+        <a href="/wiki/{{ kb.slug }}" class="card block p-5 hover:shadow-lg transition-all">
+            <h3 class="font-semibold page-title mb-2">{{ kb.name }}</h3>
+            <div class="flex gap-4 text-xs text-subtle">
+                <span>📝 {{ kb.wiki_count }} wiki</span>
+                <span>📄 {{ kb.source_count }} 源文档</span>
+            </div>
+        </a>
         {% endfor %}
     </div>
 
     {% if not kbs %}
     <div class="text-center py-20 text-subtle">
         <p class="text-lg mb-2">还没有知识库</p>
-        <p class="text-sm mb-4">创建第一个知识库开始</p>
-        <button onclick="showCreateDialog()" class="btn btn-primary">+ 新建知识库</button>
+        <p class="text-sm mb-4">在 WIKI_ROOT 下创建包含 <code>wiki/</code> 子目录的文件夹即可</p>
+        <pre class="inline-block text-left text-xs p-3 rounded">{{ wiki_root }}
+        ├── my-kb/
+        │   ├── wiki/           ← Agent 维护的页面
+        │   │   └── index.md
+        │   └── sources/        ← 你放入的原始文档
+        │       └── 001__my-paper/
+        │           └── source.pdf</pre>
     </div>
     {% endif %}
 </div>
-
-<!-- Confirm delete dialog -->
-<div id="confirm-delete-dialog" class="hidden dialog-overlay" onclick="if(event.target===this){hideConfirmDelete()}">
-    <div class="dialog-box" onclick="event.stopPropagation()">
-        <h2 class="dialog-title text-danger-title">确认删除</h2>
-        <p id="confirm-delete-msg" class="text-sm mb-6 text-secondary"></p>
-        <div class="flex justify-end gap-3">
-            <button onclick="hideConfirmDelete()" class="btn btn-ghost">取消</button>
-            <button onclick="doDelete()" class="btn btn-danger-filled">确认删除</button>
-        </div>
-    </div>
-</div>
-
-<!-- Create dialog -->
-<div id="create-dialog" class="hidden dialog-overlay" onclick="if(event.target===this){hideCreateDialog()}">
-    <div class="dialog-box" onclick="event.stopPropagation()">
-        <h2 class="dialog-title">新建知识库</h2>
-        <form onsubmit="createKB(event)">
-            <input type="text" name="name" placeholder="名称" required class="input mb-3">
-            <input type="text" name="description" placeholder="描述（可选）" class="input mb-4">
-            <div class="flex justify-end gap-3">
-                <button type="button" onclick="hideCreateDialog()" class="btn btn-ghost">取消</button>
-                <button type="submit" class="btn btn-primary">创建</button>
-            </div>
-        </form>
-    </div>
-</div>
-{% endblock %}
-
-{% block scripts %}
-<script>
-function showCreateDialog() {
-    document.getElementById('create-dialog').classList.remove('hidden');
-}
-function hideCreateDialog() {
-    document.getElementById('create-dialog').classList.add('hidden');
-}
-async function createKB(e) {
-    e.preventDefault();
-    const form = e.target;
-    const data = {
-        name: form.name.value,
-        description: form.description.value || null,
-    };
-    try {
-        const resp = await fetch('/v1/knowledge-bases', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(data),
-        });
-        if (!resp.ok) throw new Error((await resp.json()).detail || 'Failed');
-        const kb = await resp.json();
-        window.location.href = `/wikis/${kb.slug}`;
-    } catch (err) {
-        window.toast(err.message, 'error');
-    }
-}
-let _pendingDelete = null;
-function confirmDeleteKB(e, kbId, kbName) {
-    e.preventDefault(); e.stopPropagation();
-    _pendingDelete = {type: 'kb', id: kbId};
-    document.getElementById('confirm-delete-msg').textContent = `确定要删除知识库「${kbName}」吗？所有文档和 wiki 页面将被永久删除。`;
-    document.getElementById('confirm-delete-dialog').classList.remove('hidden');
-}
-function confirmDeleteDoc(e, docId, docName, isWiki) {
-    e.preventDefault(); e.stopPropagation();
-    _pendingDelete = {type: 'doc', id: docId};
-    const label = isWiki ? 'wiki 页面' : '文档';
-    document.getElementById('confirm-delete-msg').textContent = `确定要删除${label}「${docName}」吗？`;
-    document.getElementById('confirm-delete-dialog').classList.remove('hidden');
-}
-async function doDelete() {
-    if (!_pendingDelete) return;
-    const {type, id} = _pendingDelete;
-    const url = type === 'kb' ? `/v1/knowledge-bases/${id}` : `/v1/documents/${id}`;
-    try {
-        const resp = await fetch(url, {method: 'DELETE'});
-        if (!resp.ok) throw new Error('删除失败');
-        window.toast('已删除', 'success');
-        setTimeout(() => location.reload(), 600);
-    } catch (err) {
-        window.toast(err.message, 'error');
-    }
-    hideConfirmDelete();
-}
-function hideConfirmDelete() {
-    document.getElementById('confirm-delete-dialog').classList.add('hidden');
-    _pendingDelete = null;
-}
-(async () => {
-    try {
-        const resp = await fetch('/v1/extractions?status=pending');
-        const tasks = await resp.json();
-        const cnt = document.getElementById('pending-count');
-        if (tasks.length > 0) {
-            cnt.textContent = tasks.length;
-            cnt.classList.remove('hidden');
-        }
-    } catch {}
-})();
-</script>
 {% endblock %}

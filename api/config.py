@@ -3,19 +3,19 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 def _default_user_id() -> str:
-    return str(uuid.uuid4())
+    return "local"
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file="../.env", extra="ignore")
 
-    # Database
-    DATABASE_URL: str
+    # File-system storage (replaces PostgreSQL)
+    WIKI_ROOT: str = "./wiki_data/"
 
     # Single user
     SINGLE_USER_ID: str = _default_user_id()
 
-    # Local storage
+    # Local storage (deprecated — kept for TUS upload temp files)
     STORAGE_ROOT: str = "./data/files/"
 
     # Ollama (embedding + local LLM)
@@ -38,7 +38,7 @@ class Settings(BaseSettings):
 
     # URLs
     STAGE: str = "dev"
-    APP_URL: str = "http://localhost:3000"
+    APP_URL: str = "http://localhost:8000"
     API_URL: str = "http://localhost:8000"
     MCP_URL: str = "http://localhost:8080/mcp"
 

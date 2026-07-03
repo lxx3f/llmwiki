@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}审核 — LLM Wiki{% endblock %}
+
+{% block content %}
+<div class="p-6">
+    <h1 class="text-2xl font-bold mb-6">待审核变更</h1>
+
+    {% if branches %}
+    <div class="space-y-4">
+        {% for b in branches %}
+        <div class="card p-4 hover:shadow-lg transition-shadow">
+            <div class="flex items-center justify-between">
+                <div class="flex-1">
+                    <a href="/review/{{ b.name }}" class="text-lg font-medium hover:underline">
+                        {{ b.name }}
+                    </a>
+                    <p class="text-sm text-muted mt-1">{{ b.message }}</p>
+                    {% if b.stat %}
+                    <pre class="text-xs text-muted mt-1">{{ b.stat }}</pre>
+                    {% endif %}
+                </div>
+                <div class="flex gap-2 ml-4">
+                    <form method="POST" action="/review/{{ b.name }}/approve" class="inline"
+                          onsubmit="return confirm('确定要合并 {{ b.name }}？')">
+                        <button class="px-3 py-1.5 text-sm bg-green-600 text-white rounded hover:bg-green-700 transition-colors">
+                            批准
+                        </button>
+                    </form>
+                    <form method="POST" action="/review/{{ b.name }}/reject" class="inline"
+                          onsubmit="return confirm('确定要拒绝 {{ b.name }}？此分支将被删除。')">
+                        <button class="px-3 py-1.5 text-sm bg-red-500 text-white rounded hover:bg-red-600 transition-colors">
+                            拒绝
+                        </button>
+                    </form>
+                </div>
+            </div>
+            <a href="/review/{{ b.name }}" class="text-sm mt-2 inline-block hover:underline">
+                查看 diff →
+            </a>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="card p-8 text-center text-muted">
+        <p class="text-lg mb-2">没有待审核的变更</p>
+        <p class="text-sm">Agent 创建的 ingest 分支会出现在这里</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

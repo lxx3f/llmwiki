@@ -1,38 +1,51 @@
+"""Integration test fixtures — file-system backed."""
+
 import os
+import shutil
+import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 
-import asyncpg
 import httpx
 import pytest
 
-from tests.helpers.jwt import seed_jwks_cache
+from services.filestore import FileStore
 
-DB_URL = os.environ["DATABASE_URL"]
+API_DIR = Path(__file__).parent.parent.parent / "api"
 
 
-@pytest.fixture(scope="session")
-async def pool():
-    pool = await asyncpg.create_pool(DB_URL, min_size=2, max_size=20)
-
-    await pool.execute("DROP SCHEMA IF EXISTS public CASCADE")
-    await pool.execute("CREATE SCHEMA public")
-
-    schema_sql = (Path(__file__).parent.parent / "helpers" / "schema.sql").read_text()
-    await pool.execute(schema_sql)
-
-    yield pool
-    pool.terminate()
+@contextmanager
+def _in_api_dir():
+    old = os.getcwd()
+    os.chdir(API_DIR)
+    try:
+        yield old
+    finally:
+        os.chdir(old)
 
 
 @pytest.fixture
-async def client(pool):
-    from main import app
+def store():
+    """Create a temporary FileStore for testing."""
+    tmp = tempfile.mkdtemp(prefix="llmwiki_test_")
+    s = FileStore(tmp)
+    s.ensure_dirs()
+    yield s
+    shutil.rmtree(tmp, ignore_errors=True)
 
-    app.state.pool = pool
-    app.state.s3_service = None
+
+@pytest.fixture
+async def client(store):
+    """Async HTTP client for testing the FastAPI app."""
+    with _in_api_dir():
+        from main import app
+
+    app.state.store = store
     app.state.ocr_service = None
+    app.state.effective_user_id = store.get_or_create_user()["id"]
 
-    seed_jwks_cache()
+    # Seed a test KB
+    store.create_kb("Test KB", "A test knowledge base")
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:

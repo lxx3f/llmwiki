@@ -1,42 +1,39 @@
 {% extends "base.html" %}
-{% block title %}设置 - LLM Wiki{% endblock %}
+{% block title %}设置 — LLM Wiki{% endblock %}
 {% block content %}
 <div class="max-w-3xl mx-auto p-8">
-    <h1 class="text-2xl font-bold mb-6 page-title">系统设置</h1>
+    <h1 class="text-2xl font-bold mb-6 page-title">设置</h1>
 
     <div class="space-y-6">
         <div class="card p-5">
-            <h2 class="font-semibold mb-2 page-title">MCP 连接配置</h2>
-            <p class="text-sm mb-3 text-secondary">将以下配置添加到 Claude Desktop 的 <code>claude_desktop_config.json</code> 中：</p>
-            <pre class="code-block">{
-  "mcpServers": {
-    "llmwiki": {
-      "url": "{{ mcp_url }}"
-    }
-  }
-}</pre>
+            <h2 class="font-semibold mb-3 page-title">Wiki 根目录</h2>
+            <p class="text-sm mb-3 text-secondary">
+                Wiki 数据存储位置。用 Obsidian 打开此目录即可获得最佳浏览体验。
+            </p>
+            <p class="text-sm font-mono bg-gray-50 rounded px-3 py-2">{{ wiki_root }}</p>
+            <p class="text-xs text-muted mt-2">
+                修改请编辑项目根目录的 <code>.env</code> 文件中的 <code>WIKI_ROOT</code>
+            </p>
         </div>
 
         <div class="card p-5">
-            <h2 class="font-semibold mb-3 page-title">系统状态</h2>
-            <div class="grid gap-0 text-sm">
-                <div class="status-row">
-                    <span class="status-label">数据库</span>
-                    <span class="status-ok">已连接 (PostgreSQL)</span>
-                </div>
-                <div class="status-row">
-                    <span class="status-label">存储</span>
-                    <span class="status-ok">{{ storage_root }}</span>
-                </div>
-                <div class="status-row">
-                    <span class="status-label">Ollama</span>
-                    <span class="status-ok">{{ ollama_url }}</span>
-                </div>
-                <div class="status-row" style="border-bottom:none">
-                    <span class="status-label">用户 ID</span>
-                    <span class="status-value font-mono text-xs">{{ user_id }}</span>
-                </div>
-            </div>
+            <h2 class="font-semibold mb-2 page-title">Agent 连接</h2>
+            <p class="text-sm text-secondary">
+                LLM Wiki 不再运行独立的 MCP 服务器。Agent（Claude Code / OpenClaw / NanoBot）直接操作文件系统和 Git。
+            </p>
+        </div>
+
+        <div class="card p-5">
+            <h2 class="font-semibold mb-2 page-title">审核流程</h2>
+            <p class="text-sm text-secondary mb-2">
+                Agent 的所有变更通过 Git 分支提交：
+            </p>
+            <ol class="text-sm text-secondary list-decimal list-inside space-y-1">
+                <li>Agent 创建 <code>ingest/{doc_id}</code> 分支</li>
+                <li>在分支上修改 wiki 文件</li>
+                <li>在 <a href="/review" class="text-blue-600 hover:underline">审核页面</a> 查看 diff</li>
+                <li>批准 → merge / 拒绝 → 删除分支</li>
+            </ol>
         </div>
     </div>
 </div>
