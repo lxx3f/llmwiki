@@ -151,6 +151,69 @@ cd C:\Users\23236\repositories\llmwiki
 | `.env` 加载 | `cd api` 后启动 | NSSM 启动时 `AppDirectory=api` 即可 |
 | 代码修改 | 自动热重载 | 需 `scripts/restart.bat` 才生效 |
 
+### 代码更新后的部署工作流
+
+NSSM 服务**不会自动监听文件变化**——它启动 Python 时读一次磁盘，运行期不再 reload。所以改完代码必须**重启服务**才能生效。
+
+**TL;DR：改完代码 → `scripts\restart.bat` → `scripts\status.bat` 验证**
+
+#### 常见改动对照表
+
+| 改动类型 | 步骤 | 需要重跑 install_services.ps1？ |
+|---------|------|------------------------------|
+| **api/main.py / 路由 / 模板** | `scripts\restart.bat` | ❌ |
+| **agent/run.py / providers/ / tools/** | `scripts\restart.bat` | ❌ |
+| **CSS / JS / 静态文件** | `scripts\restart.bat`（浏览器需 `Ctrl+Shift+R` 强刷） | ❌ |
+| **`.env`**（WIKI_ROOT / 端口 / 模型等）| `scripts\restart.bat`（启动时一次性加载） | ❌ |
+| **新增 pip 依赖** | `pip install ...` → `scripts\restart.bat` | ❌ |
+| **改端口 / 解释器路径** | `nssm set LlmWikiApi AppParameters ...` → restart | ❌ |
+| **改 NSSM 高级配置**（日志路径、重启策略）| `nssm edit LlmWikiApi` (GUI) → restart | ❌ |
+| **首次安装 / 完全重装** | `.\scripts\install_services.ps1 -PythonPath ...` | ✅ |
+
+#### 常用命令速查
+
+```powershell
+# 重启（一键）
+scripts\restart.bat
+
+# 状态 + 健康检查（一键）
+scripts\status.bat
+
+# 看 4 个日志末尾
+scripts\tail-logs.bat
+
+# 实时跟踪 API 日志
+Get-Content 'C:\Users\23236\repositories\llmwiki\logs\api.out.log' -Wait
+
+# 实时跟踪 agent 日志
+Get-Content 'C:\Users\23236\repositories\llmwiki\logs\agent.err.log' -Wait
+```
+
+#### 改完代码看不到效果？查这 4 件事
+
+1. **改了 `.env` 没生效** — `.env` 在服务启动时一次性加载到 `os.environ`，运行期改不会自动重载。必须重启。
+2. **模板 / 静态资源浏览器还在看旧版** — `Ctrl+Shift+R` 强制刷新（绕过浏览器 + uvicorn 模板缓存）。
+3. **重启后 API 502 / 启动失败** — `logs\api.err.log` 末尾看 Python 异常（多半是 import 错误或新依赖没装）。
+4. **端口 TIME_WAIT 卡住 START_PENDING** — 等待 5-10 秒（NSSM 的 `AppThrottle 5000` 防崩溃循环机制；首次启动延迟无法消除）。
+
+#### 完整生命周期
+
+```
+首次部署:      .\scripts\install_services.ps1 -PythonPath 'C:\...\python.exe'
+   ↓
+日常开发:      edit → git commit → scripts\restart.bat → 验证
+   ↓
+配置改动:      edit .env → scripts\restart.bat
+   ↓
+依赖更新:      pip install → scripts\restart.bat
+   ↓
+NSSM 配置:     nssm edit LlmWikiApi (GUI) 或 nssm set ... → restart
+   ↓
+完全重装:      .\scripts\install_services.ps1 （幂等：stop + remove + reinstall）
+   ↓
+完全卸载:      .\scripts\uninstall_services.ps1
+```
+
 ## 架构关键概念
 
 ### FileStore 存储层（`api/services/filestore.py`）

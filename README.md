@@ -214,6 +214,70 @@ Agent 每 60s 扫描一次 sources/。首次启动会自动创建默认 KB 结�
 
 把 `WIKI_ROOT` 目录作为 vault 用 Obsidian 打开，获得链接预览 + 图视图 + 双向链接。
 
+## 服务化部署（NSSM，可选）
+
+上面「快速开始」是**开发模式**——两个进程都在终端前台跑，关掉就停。要做常驻部署，把它们注册成 Windows 服务，开机自启 + 崩溃自动重启 + 后台跑。
+
+### 一次性准备
+
+1. 下载 [NSSM](https://nssm.cc/) 或 [GitHub Release 版](https://github.com/nssmcc/nssm/releases)，解压到任意目录（如 `C:\Tools\nssm-win64-Release\`）
+2. 确保 Python 在管理员 PowerShell 里能找到（管理员会话继承的是**系统 PATH**，可能和普通终端不同——优先用绝对路径）
+
+### 安装
+
+**管理员 PowerShell**：
+
+```powershell
+cd C:\Users\23236\repositories\llmwiki
+.\scripts\install_services.ps1 -PythonPath 'C:\ProgramData\miniconda3\python.exe'
+```
+
+脚本会自动：
+- 检测 NSSM（找不到会报错并打印搜索过的路径）
+- 检测 Python（**跳过** Microsoft Store stub；如有依赖缺失会给出 `PYTHONNOUSERSITE=1 + pip install` 修复命令）
+- 注册 `LlmWikiApi` + `LlmWikiAgent` 两个 Windows 服务
+- 配日志轮转（10MB/文件）+ 崩溃自动重启（5s 延迟）
+- 8s 后做健康检查（`nssm status` + HTTP 探测），输出 `[+]/[-]` 总结
+
+> ⚠️ 常见坑：用 `pip install --user` 装过的依赖在服务里读不到（服务跑在 `LocalSystem` 账户下，没有你的用户配置）。要么重装到 conda base，要么用 `-PythonPath` 指向带依赖的解释器。
+
+### 日常操作
+
+| 动作 | 命令 |
+|------|------|
+| 启动 / 停止 / 重启 | `scripts\start.bat` / `stop.bat` / `restart.bat` |
+| 状态 + 健康检查 | `scripts\status.bat` |
+| 看 4 个日志末尾 50 行 | `scripts\tail-logs.bat` |
+| 实时跟踪 API 日志 | `Get-Content logs\api.out.log -Wait` |
+| 完全卸载 | `.\scripts\uninstall_services.ps1`（管理员） |
+
+### 改完代码怎么生效？
+
+**NSSM 不会自动监听文件变化**——它启动 Python 时读一次磁盘。所以改完代码必须重启服务：
+
+```powershell
+scripts\restart.bat
+scripts\status.bat   # 验证 STATE=4 RUNNING + curl 200
+```
+
+更详细的改动类型对照表、`.env` 重载注意、浏览器缓存问题等见 [CLAUDE.md 服务化部署章节](CLAUDE.md#服务化部署nssm)。
+
+### 完整生命周期
+
+```
+首次部署     .\scripts\install_services.ps1 -PythonPath ...
+   ↓
+日常开发     edit → git commit → scripts\restart.bat → scripts\status.bat
+   ↓
+改 .env     scripts\restart.bat    （env 启动时一次性加载）
+   ↓
+加新依赖    pip install ... → scripts\restart.bat
+   ↓
+完全重装    .\scripts\install_services.ps1   （幂等：stop + remove + reinstall）
+   ↓
+完全卸载    .\scripts\uninstall_services.ps1
+```
+
 ## Agent Skills（`.claude/skills/`）
 
 | Skill | 触发 | 功能 |
