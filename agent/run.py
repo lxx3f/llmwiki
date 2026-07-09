@@ -114,6 +114,45 @@ def log(msg: str, *args: Any) -> None:
 
 STATE_FILE = Path(__file__).resolve().parent / ".state.json"
 
+# ── Scan trigger file (sentinel for immediate scans) ─────────
+# The API writes this file when a user clicks "立即扫描" in the dashboard.
+# The main loop's sub-poll picks it up within ~1s regardless of SCAN_INTERVAL.
+# Path MUST match the API side's SCAN_TRIGGER_FILE in api/main.py.
+SCAN_TRIGGER_FILE = Path(__file__).resolve().parent / ".scan_requested"
+SUB_POLL_INTERVAL = 1  # seconds between checks during sleep
+
+
+async def _wait_with_trigger(seconds: int) -> bool:
+    """Sleep up to `seconds`, but break early if SCAN_TRIGGER_FILE exists.
+
+    Polls every SUB_POLL_INTERVAL seconds for snappy response without
+    burning CPU. Returns True if the trigger file was found and consumed.
+    """
+    for _ in range(seconds):
+        if SCAN_TRIGGER_FILE.exists():
+            try:
+                SCAN_TRIGGER_FILE.unlink()
+            except FileNotFoundError:
+                pass
+            return True
+        await asyncio.sleep(SUB_POLL_INTERVAL)
+    return False
+
+
+def _consume_trigger() -> bool:
+    """Atomically check + remove the trigger file. Returns True if consumed.
+
+    Used at the top of the main loop to handle the case where the trigger
+    was set while the agent was busy with a previous scan.
+    """
+    if SCAN_TRIGGER_FILE.exists():
+        try:
+            SCAN_TRIGGER_FILE.unlink()
+        except FileNotFoundError:
+            pass
+        return True
+    return False
+
 
 def _write_state(state: str, current_doc: str = "", branch: str = "",
                  round: int = 0, extra: dict | None = None) -> None:
@@ -633,7 +672,7 @@ async def main() -> None:
     log(f"LLM Wiki Agent v{config.VERSION}")
     log(f"  WIKI_ROOT: {config.WIKI_ROOT}")
     log(f"  Provider: {config.PROVIDER} / {config.MODEL}")
-    log(f"  扫描间隔: {config.SCAN_INTERVAL}s")
+    log(f"  扫描间隔: {config.SCAN_INTERVAL}s（API 触发的扫描可在 ~1s 内唤醒）")
     log(f"  日志: {config.LOG_FILE}")
     log(f"  Git: {config.GIT_USER_NAME} <{config.GIT_USER_EMAIL}>")
     log("=" * 40)
@@ -643,6 +682,11 @@ async def main() -> None:
     _write_state(state="idle", extra={"started_at": datetime.now(timezone.utc).isoformat()})
 
     while True:
+        # Consume any trigger file set while we were busy (race-during-ingest).
+        # If the API wrote .scan_requested while we were ingesting, pick it up
+        # now and force a re-scan even if no new docs are pending.
+        triggered_now = _consume_trigger()
+
         try:
             pending = find_pending_docs()
             if pending:
@@ -657,15 +701,20 @@ async def main() -> None:
                         # Try to get back to master
                         _git("checkout", "-f", "master")
             else:
-                log(f"扫描: 无待处理文档")
+                if triggered_now:
+                    log("扫描: 外部触发（无待处理文档）")
+                else:
+                    log(f"扫描: 无待处理文档")
                 _write_state(state="idle")
         except Exception as e:
             log(f"扫描出错: {e}")
             logger.exception("scan failed")
             _write_state(state="error", extra={"last_error": str(e)[:200]})
 
-        log(f"等待 {config.SCAN_INTERVAL}s...")
-        await asyncio.sleep(config.SCAN_INTERVAL)
+        log(f"等待 {config.SCAN_INTERVAL}s（API 触发可提前唤醒）...")
+        triggered_in_wait = await _wait_with_trigger(config.SCAN_INTERVAL)
+        if triggered_in_wait:
+            log("检测到外部触发，立即扫描")
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ a review UI for accepting/rejecting Agent-proposed changes.
 import logging
 import os
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
 # ── Fix broken SSL_CERT_FILE on conda/Windows ──
@@ -423,6 +424,39 @@ async def agent_status_json():
         "pending": pending_docs("main"),
         "recent_ingests": recent_ingests(10),
     }
+
+
+# Sentinel file that wakes the agent's main loop early. Path MUST match
+# agent/run.py's SCAN_TRIGGER_FILE (defined alongside STATE_FILE there).
+SCAN_TRIGGER_FILE = Path(__file__).resolve().parent.parent / "agent" / ".scan_requested"
+
+
+@app.post("/v1/agent/scan")
+async def agent_scan_trigger():
+    """Trigger an immediate agent scan, bypassing the SCAN_INTERVAL wait.
+
+    Writes a sentinel file under agent/.scan_requested. The agent's main
+    loop checks for this file every ~1s during its sleep cycle, removes
+    it, and runs a scan. Latency from click → scan start is bounded by
+    the sub-poll interval, not SCAN_INTERVAL (default 1h).
+
+    Idempotent: if a trigger is already pending, this is a no-op touch.
+    Safe to call repeatedly — the dashboard disables the button while the
+    agent is already running an ingest.
+    """
+    try:
+        SCAN_TRIGGER_FILE.parent.mkdir(parents=True, exist_ok=True)
+        SCAN_TRIGGER_FILE.touch()
+        logger.info("Scan trigger written to %s", SCAN_TRIGGER_FILE)
+        return {
+            "ok": True,
+            "triggered_at": datetime.now(timezone.utc).isoformat(),
+            "trigger_file": str(SCAN_TRIGGER_FILE),
+            "note": "agent picks this up within ~1s during its sleep cycle",
+        }
+    except OSError as e:
+        logger.error("Failed to write scan trigger: %s", e)
+        return {"ok": False, "error": str(e)}
 
 
 @app.get("/agent/log")

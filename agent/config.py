@@ -87,8 +87,15 @@ if not WIKI_ROOT.is_absolute():
 
 # ── Agent behavior ────────────────────────────────────────────
 
-SCAN_INTERVAL = int(os.getenv("AGENT_SCAN_INTERVAL", "60"))
-"""Seconds between scans of sources/."""
+SCAN_INTERVAL = int(os.getenv("AGENT_SCAN_INTERVAL", "3600"))
+"""Seconds between scans of sources/. Default 3600s (1 hour).
+
+The actual scan latency is bounded by the sub-poll interval inside the
+main loop (~1s), not this value — when the API writes the trigger file
+the agent picks it up within ~1s regardless of how high this is set.
+
+Set via AGENT_SCAN_INTERVAL env var (e.g. AGENT_SCAN_INTERVAL=300 for 5 min).
+"""
 
 # ── Logging ────────────────────────────────────────────────────
 

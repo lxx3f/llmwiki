@@ -115,9 +115,18 @@
                     {% endif %}
                 </div>
             </div>
-            <div class="text-sm" style="color: var(--tw-text-muted);">
-                最后更新: {{ state.last_update or '—' }}
-                {% if state.last_completed_at %}<br>上次完成: {{ state.last_completed_at }}{% endif %}
+            <div class="flex items-center gap-3">
+                <button id="scan-trigger-btn"
+                        class="btn btn-primary"
+                        onclick="triggerScan()"
+                        title="绕过 1 小时扫描间隔，立即唤醒 agent 扫描 sources/">
+                    🔍 立即扫描
+                </button>
+                <span id="scan-trigger-msg" class="text-sm" style="color: var(--tw-text-muted);"></span>
+                <div class="text-sm" style="color: var(--tw-text-muted);">
+                    最后更新: {{ state.last_update or '—' }}
+                    {% if state.last_completed_at %}<br>上次完成: {{ state.last_completed_at }}{% endif %}
+                </div>
             </div>
         </div>
         {% if stale %}
@@ -126,6 +135,55 @@
         </div>
         {% endif %}
     </div>
+
+    <script>
+    // 立即扫描：写 sentinel 文件，agent 主循环在 ~1s 内唤醒并扫描
+    async function triggerScan() {
+        const btn = document.getElementById('scan-trigger-btn');
+        const msg = document.getElementById('scan-trigger-msg');
+        if (btn.disabled) return;
+        btn.disabled = true;
+        msg.textContent = '请求中…';
+        msg.style.color = 'var(--tw-text-muted)';
+        try {
+            const resp = await fetch('/v1/agent/scan', {method: 'POST'});
+            const data = await resp.json();
+            if (data.ok) {
+                msg.textContent = '✓ 已请求 · 约 1s 后 agent 开始扫描';
+                msg.style.color = '#065f46';
+                setTimeout(() => { msg.textContent = ''; }, 6000);
+            } else {
+                msg.textContent = '✗ ' + (data.error || '请求失败');
+                msg.style.color = '#991b1b';
+            }
+        } catch (e) {
+            msg.textContent = '✗ 网络错误: ' + e;
+            msg.style.color = '#991b1b';
+        } finally {
+            // 1s 后允许再次点击（agent 这时应该已经在扫描/已扫描完）
+            setTimeout(() => { btn.disabled = false; }, 1000);
+        }
+    }
+
+    // 当 agent 在跑时自动 disable 按钮（每 5s 同步一次，跟主刷新同节奏）
+    let lastAgentState = null;
+    async function syncButtonState() {
+        try {
+            const r = await fetch('/v1/agent/status');
+            const d = await r.json();
+            const btn = document.getElementById('scan-trigger-btn');
+            if (!btn) return;
+            const isRunning = d.state?.state === 'running';
+            if (isRunning !== (btn.dataset.locked === '1')) {
+                btn.disabled = isRunning;
+                btn.dataset.locked = isRunning ? '1' : '0';
+            }
+            lastAgentState = d.state?.state;
+        } catch (e) {}
+    }
+    syncButtonState();
+    setInterval(syncButtonState, 5000);
+    </script>
 
     <!-- KB stats -->
     <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
