@@ -34,6 +34,19 @@ from providers.base import (
 )
 from tools import all_tools, execute_tool
 
+# ── stdout/stderr UTF-8 (avoid mojibake in NSSM-redirected logs) ─────
+# Under NSSM, sys.stdout / sys.stderr are redirected to a UTF-8 log file
+# but keep the parent's console code page. Forcing UTF-8 here makes
+# Chinese (and other non-ASCII) characters survive intact into
+# logs/agent.out.log, so /agent monitor + tail-logs.bat render cleanly.
+for _stream_name in ('stdout', 'stderr'):
+    _stream = getattr(sys, _stream_name, None)
+    if _stream is not None and hasattr(_stream, 'reconfigure'):
+        try:
+            _stream.reconfigure(encoding='utf-8')
+        except Exception:
+            pass  # best-effort; file handlers below already do UTF-8
+
 # ── Logging ────────────────────────────────────────────────────
 
 from logging.handlers import TimedRotatingFileHandler

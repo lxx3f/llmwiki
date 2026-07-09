@@ -95,20 +95,82 @@ if (-not $nssm) {
     exit 1
 }
 
+# Make nssm invokable as bare `nssm ...` for the rest of the script.
+# This insulates Install-LlmWikiService from PATH lookup, even when NSSM
+# wasn't added to system PATH permanently. Idempotent — prepending again
+# when already present is harmless.
+$nssmBin = Split-Path -Parent $nssm
+$env:Path = "$nssmBin;$env:Path"
+Write-Host ('[OK] Added NSSM dir to PATH for this session: ' + $nssmBin)
+
 # ── 3. Detect Python ───────────────────────────────────────
-if (-not $PythonPath) {
-    $py = (Get-Command python.exe -ErrorAction SilentlyContinue).Source
-    if (-not $py) {
-        $py = (Get-Command py.exe -ErrorAction SilentlyContinue).Source
+# Find-Python walks PATH manually so we can skip the Microsoft Store stub
+# (Microsoft\WindowsApps\python.exe) — which silently fails inside NSSM
+# service contexts because the Store alias isn't available to LocalSystem.
+function Find-Python {
+    $storeStub = '\\Microsoft\WindowsApps\python.exe$'
+    foreach ($dir in ($env:Path -split ';')) {
+        if (-not $dir) { continue }
+        $candidate = Join-Path $dir 'python.exe'
+        if (Test-Path $candidate) {
+            if ($candidate -match $storeStub) {
+                Write-Host ('  [skip] Microsoft Store stub: ' + $candidate) -ForegroundColor DarkGray
+                continue
+            }
+            return (Resolve-Path $candidate).Path
+        }
     }
-    if (-not $py) {
+    return $null
+}
+
+# Test-PythonDeps runs `python -c "import X"` for each module and reports
+# which ones THIS Python can't find. Service runs as LocalSystem and only
+# sees THIS Python's site-packages — so user-site-packages (e.g. AppData\Roaming)
+# don't help. If anything is missing we print a loud warning with the fix.
+function Test-PythonDeps {
+    param([string]$Py, [string[]]$Modules)
+    $missing = @()
+    foreach ($m in $Modules) {
+        $code = "import importlib.util,sys; sys.exit(0 if importlib.util.find_spec('$m') else 1)"
+        $proc = Start-Process -FilePath $Py -ArgumentList '-c', $code -NoNewWindow -Wait -PassThru -RedirectStandardError "$env:TEMP\_dep_err.txt"
+        if ($proc.ExitCode -ne 0) { $missing += $m }
+    }
+    Remove-Item "$env:TEMP\_dep_err.txt" -ErrorAction SilentlyContinue
+    return $missing
+}
+
+if (-not $PythonPath) {
+    $PythonPath = Find-Python
+    if (-not $PythonPath) {
+        # Fallback: try `py.exe` launcher
+        $pyExe = (Get-Command py.exe -ErrorAction SilentlyContinue).Source
+        if ($pyExe) { $PythonPath = "$pyExe" }
+    }
+    if (-not $PythonPath) {
         Write-Host '[FAIL] Python not found.' -ForegroundColor Red
-        Write-Host 'Please specify with -PythonPath'
+        Write-Host 'Please specify with -PythonPath ''C:\path\to\python.exe'''
         exit 1
     }
-    $PythonPath = $py
 }
 Write-Host ('[OK] Python: ' + $PythonPath)
+
+# Verify required deps are reachable from this Python (service will run as
+# LocalSystem and cannot use the user's per-account site-packages).
+$required = @('uvicorn', 'fastapi', 'anthropic', 'openai', 'mistune', 'pdf_oxide')
+$missing = Test-PythonDeps -Py $PythonPath -Modules $required
+if ($missing.Count -gt 0) {
+    Write-Host ''
+    Write-Host ('[WARN] Missing modules: ' + ($missing -join ', ')) -ForegroundColor Yellow
+    Write-Host '  The service runs as LocalSystem and cannot use your user site-packages.' -ForegroundColor Yellow
+    Write-Host '  Likely cause: dependencies installed with `pip install --user`.' -ForegroundColor Yellow
+    Write-Host ''
+    Write-Host '  Fix (run in admin PowerShell from this repo):' -ForegroundColor Cyan
+    Write-Host ('    $env:PYTHONNOUSERSITE = 1')
+    Write-Host ('    & ''' + $PythonPath + ''' -m pip install -r api\requirements.txt -r agent\requirements.txt')
+    Write-Host ''
+    Write-Host '  Then re-run this script. Continuing anyway (install will register but service may fail to start).' -ForegroundColor Yellow
+}
+
 Write-Host ('[OK] NSSM:   ' + $nssm)
 Write-Host ('[OK] Project root: ' + $ProjectRoot)
 Write-Host ''
@@ -190,10 +252,59 @@ Install-LlmWikiService `
     -Stdout (Join-Path $LogDir 'agent.out.log') `
     -Stderr (Join-Path $LogDir 'agent.err.log')
 
-# ── 8. Done ────────────────────────────────────────────────
-Write-Host '=====================================' -ForegroundColor Green
-Write-Host 'Installation complete' -ForegroundColor Green
+# ── 8. Verify both services actually started ────────────────
+# `nssm start` returns immediately even if the executable crashes a few
+# hundred ms later (we saw this: missing uvicorn in LocalSystem context).
+# So wait a beat, then check process state and a real HTTP probe.
+Write-Host ''
+Write-Host 'Waiting 8s for services to settle...' -ForegroundColor Cyan
+Start-Sleep -Seconds 8
+
+$apiRunning = $false
+$agentRunning = $false
+$httpOk = $false
+
+$apiStatus = & nssm status LlmWikiApi 2>$null
+if ($LASTEXITCODE -eq 0 -and ($apiStatus | Select-String -SimpleMatch 'SERVICE_RUNNING')) {
+    $apiRunning = $true
+}
+$agentStatus = & nssm status LlmWikiAgent 2>$null
+if ($LASTEXITCODE -eq 0 -and ($agentStatus | Select-String -SimpleMatch 'SERVICE_RUNNING')) {
+    $agentRunning = $true
+}
+
+try {
+    $resp = Invoke-WebRequest "http://localhost:$ApiPort/v1/agent/status" -UseBasicParsing -TimeoutSec 5
+    if ($resp.StatusCode -eq 200) { $httpOk = $true }
+} catch {
+    $httpOk = $false
+}
+
+# Also catch the "process stopped immediately" case: STATE != RUNNING
+# is reported by NSSM as "SERVICE_STOPPED" only after Throttle delay.
+# nssm status reports SERVICE_START_PENDING for in-progress boots, so we
+# check both exits to disambiguate 'starting now' from 'dead'.
+
+Write-Host ''
 Write-Host '====================================='
+if ($apiRunning -and $agentRunning -and $httpOk) {
+    Write-Host 'Installation verified' -ForegroundColor Green
+    Write-Host '=====================================' -ForegroundColor Green
+    Write-Host ('  [+] LlmWikiApi     : SERVICE_RUNNING')
+    Write-Host ('  [+] LlmWikiAgent   : SERVICE_RUNNING')
+    Write-Host ('  [+] HTTP /v1/agent/status : 200')
+} else {
+    Write-Host '⚠ Verification FAILED' -ForegroundColor Yellow
+    Write-Host '=====================================' -ForegroundColor Yellow
+    if (-not $apiRunning)    { Write-Host ('  [-] LlmWikiApi     : status = ' + $apiStatus) -ForegroundColor Yellow }
+    if (-not $agentRunning)  { Write-Host ('  [-] LlmWikiAgent   : status = ' + $agentStatus) -ForegroundColor Yellow }
+    if (-not $httpOk)        { Write-Host  '  [-] HTTP probe failed — see api.err.log' -ForegroundColor Yellow }
+    Write-Host ''
+    Write-Host '  See logs for the cause:' -ForegroundColor Yellow
+    Write-Host ('    ' + (Join-Path $LogDir 'api.err.log'))
+    Write-Host ('    ' + (Join-Path $LogDir 'agent.err.log'))
+}
+Write-Host ''
 Write-Host ('  Web UI:        http://localhost:' + $ApiPort)
 Write-Host ('  Agent status:  http://localhost:' + $ApiPort + '/v1/agent/status')
 Write-Host ('  Logs:          ' + $LogDir)
