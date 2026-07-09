@@ -36,21 +36,60 @@ from tools import all_tools, execute_tool
 
 # ── Logging ────────────────────────────────────────────────────
 
-logger = logging.getLogger("agent")
-logger.setLevel(logging.DEBUG)
+from logging.handlers import TimedRotatingFileHandler
 
-# Console handler
+# Resolve log level from config (e.g. "DEBUG" → logging.DEBUG)
+_log_level = getattr(logging, config.LOG_LEVEL, logging.INFO)
+
+logger = logging.getLogger("agent")
+logger.setLevel(logging.DEBUG)  # let handlers filter; logger captures everything
+
+# Console handler (color-less, terse)
 ch = logging.StreamHandler()
-ch.setLevel(logging.INFO)
-ch.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S"))
+ch.setLevel(_log_level)
+ch.setFormatter(logging.Formatter(
+    "%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S"
+))
 logger.addHandler(ch)
 
-# File handler (agent.log)
+# Ensure parent dirs exist
 config.LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-fh = logging.FileHandler(str(config.LOG_FILE), encoding="utf-8")
-fh.setLevel(logging.DEBUG)
-fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
-logger.addHandler(fh)
+config.LOG_ERROR_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+# Main log: all levels, daily rotation, keep 7 backups (last week).
+# Suffix defaults to %Y-%m-%d (set by `when='midnight'` rollover).
+main_handler = TimedRotatingFileHandler(
+    str(config.LOG_FILE),
+    when="midnight",
+    interval=1,
+    backupCount=config.LOG_BACKUPS,
+    encoding="utf-8",
+    utc=False,  # local time, matches console output
+)
+main_handler.setLevel(logging.DEBUG)
+# Filter out WARNING+ from main log so each level goes to exactly one file.
+# This way the errors file is a focused signal, not a duplicate of the main log.
+main_handler.addFilter(lambda r: r.levelno < logging.WARNING)
+main_handler.setFormatter(logging.Formatter(
+    "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+))
+logger.addHandler(main_handler)
+
+# Errors-only log: WARNING+ERROR, weekly rotation (Monday), keep 4 backups.
+# Sole destination for warnings and errors — long-tail error history.
+err_handler = TimedRotatingFileHandler(
+    str(config.LOG_ERROR_FILE),
+    when="W0",  # Monday
+    interval=1,
+    backupCount=config.LOG_ERROR_BACKUPS,
+    encoding="utf-8",
+    utc=False,
+)
+err_handler.setLevel(logging.WARNING)
+err_handler.setFormatter(logging.Formatter(
+    "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+))
+logger.addHandler(err_handler)
 
 
 def log(msg: str, *args: Any) -> None:

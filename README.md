@@ -158,7 +158,6 @@ Agent 据此决定：main → 摘要页；supplement → 合并到主摘要；as
 - Python 3.11+
 - Git
 - [Ollama](https://ollama.com/)（默认 LLM）或 Anthropic API key
-- 可选：[LibreOffice](https://www.libreoffice.org/)（Office 文档转换）
 
 ### 1. 克隆 & 安装
 

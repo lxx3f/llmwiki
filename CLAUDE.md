@@ -15,7 +15,6 @@ LLM Wiki 是一个单用户本地知识库系统，核心理念对应三层架�
 - **MCP** (`mcp/`): MCP 服务器，向 Claude 暴露 6 个工具（guide/search/read/write/delete/ask）
 - **存储**: 纯文件系统（`api/services/filestore.py` — JSON 元数据 + Markdown 内容），无数据库依赖
 - **搜索**: ripgrep 全文搜索（`subprocess.run(['rg', ...])`），不再依赖 pgvector/PGroonga
-- **Converter** (`converter/`): 隔离的 LibreOffice 服务，负责 office→PDF 转换
 - **AI**: Ollama 本地模型，默认 `qwen2.5:14b`
 
 ## 常用命令
@@ -126,7 +125,6 @@ MCP 数据访问通过 `mcp/store.py`（创建 FileStore 实例），不再使�
 | 文件类型 | 处理方式 |
 |---------|---------|
 | **PDF** | 默认 `pdf-oxide`（本地 Rust 库，免费），可选 Mistral OCR API（需 `MISTRAL_API_KEY`，设置 `PDF_BACKEND=mistral`） |
-| **Office (pptx/ppt/docx/doc)** | LibreOffice 转 PDF → 按 PDF 处理。通过 `CONVERTER_URL` 指向 converter 服务 |
 | **HTML** | `api/html_parser/parser.py` 自定义解析器 → Markdown + 标记 HTML，支持图片内嵌（含 SSRF 防护） |
 | **图片 (png/jpg/webp/gif)** | 直接存储，不做 OCR |
 | **表格 (xlsx/csv)** | openpyxl 解析，每个 sheet 作为一个 `document_page`，渲染为 Markdown 表格 |
@@ -290,8 +288,6 @@ Karpathy LLM Wiki 的核心理念：**LLM 全权拥有 wiki 层**。Claude Code 
 | `EMBEDDING_DIM` | `768` | 向量维度 |
 | `PDF_BACKEND` | `pdf_oxide` | PDF 处理引擎（`pdf_oxide` 或 `mistral`） |
 | `MISTRAL_API_KEY` | `""` | Mistral OCR API 密钥（仅 PDF_BACKEND=mistral 时需要） |
-| `CONVERTER_URL` | `""` | Office→PDF 转换器服务地址 |
-| `CONVERTER_SECRET` | `""` | Converter 服务认证 token |
 | `STAGE` | `dev` | 部署环境（dev/production） |
 | `APP_URL` | `http://localhost:8000` | API 自身 URL（CORS 白名单） |
 | `API_URL` | `http://localhost:8000` | API 自身 URL |

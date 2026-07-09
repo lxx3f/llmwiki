@@ -174,17 +174,32 @@
         </div>
     </div>
 
-    <!-- Log tail -->
-    <div class="metric-card">
-        <div class="flex items-center justify-between mb-3">
-            <div class="section-title" style="margin-bottom: 0;">📋 Agent 日志（最后 30 行）</div>
-            <a href="/v1/agent/status" class="text-xs" style="color: var(--tw-text-muted);" target="_blank">JSON 状态 →</a>
+    <!-- Log tail (split: recent activity + errors) -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div class="metric-card">
+            <div class="flex items-center justify-between mb-3">
+                <div class="section-title" style="margin-bottom: 0;">📋 近期活动（主日志）</div>
+                <span class="text-xs" style="color: var(--tw-text-muted);">每 5s 刷新 · 含全部级别</span>
+            </div>
+            <div hx-get="/agent/log?tail=30"
+                 hx-trigger="load, every 5s"
+                 hx-swap="innerHTML"
+                 style="max-height: 360px; overflow-y: auto; background: #fafaf9; border-radius: 4px; padding: 8px 0;">
+                <div class="text-sm" style="color: var(--tw-text-muted);">加载中…</div>
+            </div>
         </div>
-        <div hx-get="/agent/log?tail=30"
-             hx-trigger="load, every 5s"
-             hx-swap="innerHTML"
-             style="max-height: 400px; overflow-y: auto; background: #fafaf9; border-radius: 4px; padding: 8px 0;">
-            <div class="text-sm" style="color: var(--tw-text-muted);">加载中…</div>
+
+        <div class="metric-card">
+            <div class="flex items-center justify-between mb-3">
+                <div class="section-title" style="margin-bottom: 0;">⚠️ 错误 / 警告</div>
+                <span class="text-xs" style="color: var(--tw-text-muted);">每 10s 刷新 · 仅 WARNING+ERROR</span>
+            </div>
+            <div hx-get="/agent/errors?tail=15"
+                 hx-trigger="load, every 10s"
+                 hx-swap="innerHTML"
+                 style="max-height: 360px; overflow-y: auto; background: #fef7f7; border-radius: 4px; padding: 8px 0;">
+                <div class="text-sm" style="color: var(--tw-text-muted);">加载中…</div>
+            </div>
         </div>
     </div>
 </div>

@@ -130,7 +130,8 @@ def _orphans(wiki_dir: Path) -> list[dict]:
     if not pages:
         return []
 
-    # Build set of all linked targets across wiki/
+    # Build set of all linked targets across wiki/, normalized (lowercase, no .md).
+    # Handles both [[path/to/foo]] and [[path/to/foo.md]] wiki-link styles.
     linked_targets: set[str] = set()
     for p in wiki_dir.rglob("*.md"):
         try:
@@ -138,16 +139,19 @@ def _orphans(wiki_dir: Path) -> list[dict]:
         except OSError:
             continue
         for m in LINK_PATTERN.finditer(text):
-            linked_targets.add(m.group(1).strip().lower())
+            target = m.group(1).strip().lower()
+            if target.endswith(".md"):
+                target = target[:-3]
+            linked_targets.add(target)
 
-    # Normalize: [[concepts/foo]] → "concepts/foo", [[foo]] → "foo"
     orphans = []
     for p in pages:
-        rel = p.relative_to(wiki_dir).as_posix()  # e.g. "concepts/transformer.md"
-        stem = p.stem  # "transformer"
-        # Match either the full relative path (sans .md) or the bare stem
-        rel_no_ext = rel[: -len(".md")]  # "concepts/transformer"
-        if rel_no_ext.lower() in linked_targets or stem.lower() in linked_targets:
+        rel = p.relative_to(wiki_dir).as_posix()  # "concepts/transformer.md"
+        stem = p.stem                              # "transformer"
+        rel_no_ext = rel[: -len(".md")]            # "concepts/transformer"
+        if (rel_no_ext.lower() in linked_targets
+                or stem.lower() in linked_targets
+                or rel.lower() in linked_targets):  # "concepts/transformer.md" raw
             continue
         orphans.append({"path": f"{wiki_dir.parent.name}/{rel}", "incoming_refs": 0})
     return orphans
@@ -212,21 +216,26 @@ def _unindexed(wiki_dir: Path) -> list[dict]:
     except OSError:
         return []
 
-    # Extract every link target from index.md (same normalization as orphans)
+    # Extract every link target from index.md, normalized (lowercase, no .md suffix).
+    # Handles both [[path/to/foo]] and [[path/to/foo.md]] wiki-link styles, plus
+    # plain markdown links [text](path/to/foo.md).
     indexed: set[str] = set()
     for m in LINK_PATTERN.finditer(index_text):
-        indexed.add(m.group(1).strip().lower())
-    # Also accept plain relative path matches like "concepts/foo.md" or "concepts/foo"
-    for line in index_text.splitlines():
-        # find markdown link with .md suffix: [..](concepts/foo.md)
-        for m in re.finditer(r"\]\(([^)]+\.md)\)", line):
-            indexed.add(m.group(1).strip().lower()[:-3])
+        target = m.group(1).strip().lower()
+        if target.endswith(".md"):
+            target = target[:-3]
+        indexed.add(target)
+    for m in re.finditer(r"\]\(([^)]+\.md)\)", index_text):
+        target = m.group(1).strip().lower()[:-3]
+        indexed.add(target)
 
     missing = []
     for p in pages:
-        rel = p.relative_to(wiki_dir).as_posix()
-        rel_no_ext = rel[: -len(".md")]
-        if rel_no_ext.lower() in indexed or p.stem.lower() in indexed:
+        rel = p.relative_to(wiki_dir).as_posix()  # "concepts/foo.md"
+        rel_no_ext = rel[: -len(".md")]            # "concepts/foo"
+        if (rel_no_ext.lower() in indexed
+                or p.stem.lower() in indexed
+                or rel.lower() in indexed):         # "concepts/foo.md" raw
             continue
         missing.append({
             "path": f"{wiki_dir.parent.name}/{rel}",

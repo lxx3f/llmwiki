@@ -90,7 +90,34 @@ if not WIKI_ROOT.is_absolute():
 SCAN_INTERVAL = int(os.getenv("AGENT_SCAN_INTERVAL", "60"))
 """Seconds between scans of sources/."""
 
-LOG_FILE = Path(os.getenv("AGENT_LOG_FILE", str(Path(__file__).parent / "agent.log")))
+# ── Logging ────────────────────────────────────────────────────
+
+# Log directory — relative paths resolve against project root (where ../.env lives)
+LOG_DIR = Path(os.getenv("AGENT_LOG_DIR", "./logs/"))
+if not LOG_DIR.is_absolute():
+    LOG_DIR = (_PROJECT_ROOT / LOG_DIR).resolve()
+
+LOG_FILE = Path(os.getenv("AGENT_LOG_FILE", str(LOG_DIR / "agent.log")))
+"""Main log: ALL levels (DEBUG+). Rotated daily, 7 backups.
+Default: <LOG_DIR>/agent.log. Set AGENT_LOG_FILE to override the file name."""
+
+LOG_ERROR_FILE = Path(os.getenv("AGENT_LOG_ERROR_FILE", str(LOG_DIR / "agent.errors.log")))
+"""Errors-only log: WARNING+ERROR. Rotated weekly (Monday), 4 backups (~1 month).
+Default: <LOG_DIR>/agent.errors.log. Set AGENT_LOG_ERROR_FILE to override."""
+
+LOG_BACKUPS = int(os.getenv("AGENT_LOG_BACKUPS", "7"))
+"""Number of rotated main log files to keep."""
+
+LOG_ERROR_BACKUPS = int(os.getenv("AGENT_LOG_ERROR_BACKUPS", "4"))
+"""Number of rotated error log files to keep."""
+
+LOG_LEVEL = os.getenv("AGENT_LOG_LEVEL", "INFO").upper()
+"""Global minimum log level (DEBUG / INFO / WARNING / ERROR)."""
+
+LOG_MAX_BYTES = int(os.getenv("AGENT_LOG_MAX_BYTES", str(10 * 1024 * 1024)))
+"""Soft cap on a single rotated file. Time-based rotation handles daily,
+but if a single day produces >10MB (e.g. bursty ingest), this prevents
+unbounded growth within a day."""
 
 # ── Git ───────────────────────────────────────────────────────
 

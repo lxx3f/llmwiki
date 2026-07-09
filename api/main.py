@@ -392,7 +392,7 @@ async def review_reject(branch: str):
 
 from agent_monitor import (  # noqa: E402
     is_stale, list_kbs, parse_log_level, pending_docs,
-    read_log_tail, read_state, recent_ingests,
+    read_errors_tail, read_log_tail, read_state, recent_ingests,
 )
 
 
@@ -426,9 +426,23 @@ async def agent_status_json():
 
 
 @app.get("/agent/log")
-async def agent_log_partial(request: Request, tail: int = 30):
-    """HTMX partial: last N log lines, formatted as a <pre> block."""
-    lines = read_log_tail(tail)
+async def agent_log_partial(request: Request, tail: int = 30, level: str = "all"):
+    """HTMX partial: last N log lines from main log, formatted as a <pre> block.
+
+    level: "all" | "warn" | "error" — filters by minimum severity.
+    """
+    lines = read_log_tail(tail, level_filter=level)
+    return templates.TemplateResponse("agent_log_partial.html", {
+        "request": request,
+        "lines": lines,
+        "parse_level": parse_log_level,
+    })
+
+
+@app.get("/agent/errors")
+async def agent_errors_partial(request: Request, tail: int = 30):
+    """HTMX partial: last N lines from the errors-only log (WARNING+ERROR)."""
+    lines = read_errors_tail(tail)
     return templates.TemplateResponse("agent_log_partial.html", {
         "request": request,
         "lines": lines,

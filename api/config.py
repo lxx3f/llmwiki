@@ -28,10 +28,6 @@ class Settings(BaseSettings):
     MISTRAL_API_KEY: str = ""
     PDF_BACKEND: str = "pdf_oxide"  # "pdf_oxide" or "mistral"
 
-    # Converter service
-    CONVERTER_URL: str = ""
-    CONVERTER_SECRET: str = ""
-
     # Observability
     LOGFIRE_TOKEN: str = ""
     SENTRY_DSN: str = ""

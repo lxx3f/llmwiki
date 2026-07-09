@@ -39,8 +39,12 @@ package-lock.json
 .netlify
 nvidia-10k-first20.md
 
-# logs
+# logs (rotating handlers may also produce .YYYY-MM-DD / .YYYY-Www siblings)
+/logs/
 */agent.log
+*/agent.errors.log
+*/agent.log.*
+*/agent.errors.log.*
 
 # Runtime data (FileStore + TUS uploads + agent state)
 api/wiki_data/
