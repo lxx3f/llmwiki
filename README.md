@@ -90,7 +90,7 @@ Agent 比较 `last_ingest_hash` vs `last_source_hash`，不一致则触发 re-in
 
 ### 3. 审核
 
-打开 http://localhost:8000/review：
+打开 http://localhost:8021/review：
 
 - 看每个分支的 commit message + diff stat
 - 点进看完整 diff（master vs 分支）
@@ -111,7 +111,7 @@ Agent 调用 `lint` 工具做 5 项检查：
 
 ## Agent 监控
 
-http://localhost:8000/agent — 实时状态仪表盘：
+http://localhost:8021/agent — 实时状态仪表盘：
 
 - **状态徽章**：idle / running / error / stale（>5 分钟无更新 = 可能僵死）
 - **当前任务**：doc_id + 分支 + 轮次
@@ -194,10 +194,10 @@ LLM_MODEL=qwen2.5:14b
 
 ```bash
 cd api
-python -m uvicorn main:app --reload --port 8000
+python -m uvicorn main:app --reload --port 8021
 ```
 
-打开 http://localhost:8000
+打开 http://localhost:8021
 
 ### 4. 启动 Agent（可选）
 

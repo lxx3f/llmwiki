@@ -34,9 +34,8 @@ class Settings(BaseSettings):
 
     # URLs
     STAGE: str = "dev"
-    APP_URL: str = "http://localhost:8000"
-    API_URL: str = "http://localhost:8000"
-    MCP_URL: str = "http://localhost:8080/mcp"
+    APP_URL: str = "http://localhost:8021"
+    API_URL: str = "http://localhost:8021"
 
     # Quotas (retained for optional caps, set high for single user)
     QUOTA_MAX_PAGES_PER_DOC: int = 300

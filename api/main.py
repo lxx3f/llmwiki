@@ -414,7 +414,7 @@ async def agent_dashboard(request: Request):
 
 @app.get("/v1/agent/status")
 async def agent_status_json():
-    """JSON status for SPA/MCP consumers."""
+    """JSON status for SPA consumers."""
     state = read_state()
     return {
         "state": state,

@@ -7,7 +7,7 @@ os.environ["SINGLE_USER_ID"] = "local"
 os.environ["OLLAMA_URL"] = "http://localhost:11434"
 os.environ["LOGFIRE_TOKEN"] = ""
 os.environ["SENTRY_DSN"] = ""
-os.environ["APP_URL"] = "http://localhost:8000"
-os.environ["API_URL"] = "http://localhost:8000"
+os.environ["APP_URL"] = "http://localhost:8021"
+os.environ["API_URL"] = "http://localhost:8021"
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "api"))

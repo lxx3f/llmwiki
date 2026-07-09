@@ -12,7 +12,7 @@ LLM Wiki 是一个单用户本地知识库系统，核心理念对应三层架�
 
 技术栈：
 - **API** (`api/`): FastAPI 后端，处理文档上传/处理/OCR、知识提取、Jinja2 模板渲染
-- **MCP** (`mcp/`): MCP 服务器，向 Claude 暴露 6 个工具（guide/search/read/write/delete/ask）
+- **Agent** (`agent/`): 后台常驻进程，扫描 `sources/` 自动 ingest 到 wiki 目录，git 追踪变更
 - **存储**: 纯文件系统（`api/services/filestore.py` — JSON 元数据 + Markdown 内容），无数据库依赖
 - **搜索**: ripgrep 全文搜索（`subprocess.run(['rg', ...])`），不再依赖 pgvector/PGroonga
 - **AI**: Ollama 本地模型，默认 `qwen2.5:14b`
@@ -24,16 +24,18 @@ LLM Wiki 是一个单用户本地知识库系统，核心理念对应三层架�
 ```bash
 cd api
 pip install -r requirements.txt
-python -m uvicorn main:app --reload --port 8000
+python -m uvicorn main:app --reload --port 8021
 ```
 
-### MCP 服务器
+### Agent 后台进程
 
 ```bash
-cd mcp
+cd agent
 pip install -r requirements.txt
-python -m uvicorn server:app --reload --port 8080
+python run.py
 ```
+
+扫描 `sources/` 目录，对未 ingest / 源更新的文档执行 wiki 写入 → git commit。详见「服务化部署（NSSM）」小节。
 
 ### 测试
 
@@ -46,6 +48,108 @@ pytest tests/unit/test_chunker.py -v
 ```
 
 CI 通过 `.github/workflows/test.yml` 自动运行。
+
+## 服务化部署（NSSM）
+
+本项目在 Windows 上通过 [NSSM](https://nssm.cc/) 把两个组件注册为 Windows 服务，实现**开机自启 + 崩溃自动重启 + 后台常驻**。
+
+### 一次性环境准备
+
+下载 NSSM（任选一种来源，路径无所谓，install 脚本会自动检测）：
+- 官网稳定版：<https://nssm.cc/release/nssm-2.24.zip> → 解压到 `C:\Tools\nssm-2.24\`
+- GitHub 最新版：<https://github.com/nssmcc/nssm/releases> → 解压到 `C:\Tools\nssm-win64-Release\`
+
+**可选**：加入 PATH（不加入也能用，install 脚本会自动探查常见路径）：
+```powershell
+# PowerShell 管理员
+setx PATH "$env:PATH;C:\Tools\nssm-win64-Release"   # GitHub 版
+# 或
+setx PATH "$env:PATH;C:\Tools\nssm-2.24\win64"        # 官网版
+```
+
+**Install 脚本的 NSSM 搜索顺序**（找不到时报错并提示）：
+1. `-NssmPath` 参数显式传入
+2. `nssm.exe` 在 PATH 中
+3. 常见安装路径（覆盖 9 种布局，含 `C:\Tools\nssm-win64-Release\nssm.exe`）
+
+### 安装/卸载服务
+
+所有脚本在 `scripts/` 目录下：
+
+| 脚本 | 用途 | 权限 |
+|------|------|------|
+| `scripts/install_services.ps1` | 注册 `LlmWikiApi` + `LlmWikiAgent` 两个服务 | 管理员（自动提权） |
+| `scripts/uninstall_services.ps1` | 停止并删除两个服务 | 管理员（自动提权） |
+| `scripts/start.bat` | 手动启动两个服务 | 普通用户 |
+| `scripts/stop.bat` | 手动停止两个服务 | 普通用户 |
+| `scripts/restart.bat` | 手动重启两个服务 | 普通用户 |
+| `scripts/status.bat` | 查看服务状态 + 健康检查 | 普通用户 |
+| `scripts/tail-logs.bat` | 尾部查看 4 个日志文件 | 普通用户 |
+
+**首次安装**（PowerShell 管理员）：
+```powershell
+cd C:\Users\23236\repositories\llmwiki
+.\scripts\install_services.ps1
+```
+
+可选参数：
+```powershell
+.\scripts\install_services.ps1 -ApiPort 9000
+.\scripts\install_services.ps1 -PythonPath "D:\Python312\python.exe"
+.\scripts\install_services.ps1 -NssmPath "C:\Tools\nssm-win64-Release\nssm.exe"
+```
+
+**卸载**（PowerShell 管理员）：
+```powershell
+.\scripts\uninstall_services.ps1
+# 同样支持 -NssmPath 覆盖
+.\scripts\uninstall_services.ps1 -NssmPath "C:\Tools\nssm-win64-Release\nssm.exe"
+```
+
+### NSSM 配置细节（`install_services.ps1` 写入）
+
+| 参数 | 值 | 作用 |
+|------|-----|------|
+| `AppDirectory` | `api/` 或 `agent/` | 工作目录——决定 `.env` 加载、相对路径解析 |
+| `AppStdout` / `AppStderr` | `logs/<svc>.{out,err}.log` | stdout/stderr 重定向到日志 |
+| `AppRotateFiles` | `1` | 启用日志轮转 |
+| `AppRotateBytes` | `10485760` | 单文件上限 10MB |
+| `Start` | `SERVICE_AUTO_START` | **开机自启** |
+| `AppExit` | `Default Restart` | 崩溃后自动重启 |
+| `AppRestartDelay` | `5000` | 重启延迟 5 秒 |
+| `AppThrottle` | `5000` | 防止崩溃循环（5 秒内不再启动） |
+
+### 关键约定
+
+- **API 服务启动命令去掉了 `--reload`**：NSSM 服务环境会破坏文件监视器，且生产用 hot-reload 不合适
+- **Agent 启动目录是 `agent/`**：`run.py` 里有 `STATE_FILE = Path(__file__).resolve().parent / ".state.json"`，必须从 agent 目录运行
+- **两个服务的 `AppDirectory` 都指向各自子目录**：`api/config.py` 和 `agent/config.py` 用 `Path(__file__).parent` 定位 `.env`，把工作目录放对是 `.env` 加载的前提
+
+### 故障排查
+
+1. **服务起不来**：看 `logs/<svc>.err.log`（NSSM 启动失败的根因通常在这里）
+2. **Agent 不工作**：看 `logs/agent.err.log` + `agent/.state.json`（`state: "error"` 字段包含 `last_error`）
+3. **端口冲突**：`netstat -ano | findstr :8021` → 找到占用进程
+4. **NSSM 命令速查**：
+   ```powershell
+   nssm start LlmWikiApi
+   nssm stop LlmWikiApi
+   nssm restart LlmWikiApi
+   nssm status LlmWikiApi
+   nssm edit LlmWikiApi    # 打开 GUI 编辑
+   nssm get LlmWikiApi AppDirectory  # 查询参数
+   ```
+5. **彻底重装**：先 `uninstall_services.ps1` 再 `install_services.ps1`
+
+### 与开发模式的区别
+
+| 维度 | 开发模式 | 服务模式 |
+|------|---------|---------|
+| 启动方式 | `python -m uvicorn main:app --reload` | NSSM 包装，无 `--reload` |
+| 日志位置 | 控制台 | `logs/api.out.log` / `logs/api.err.log` |
+| 工作目录 | 终端当前目录（一般是 `api/`） | NSSM 设置的 `AppDirectory`（也是 `api/`） |
+| `.env` 加载 | `cd api` 后启动 | NSSM 启动时 `AppDirectory=api` 即可 |
+| 代码修改 | 自动热重载 | 需 `scripts/restart.bat` 才生效 |
 
 ## 架构关键概念
 
@@ -101,20 +205,18 @@ WIKI_ROOT/                              # 默认 ./wiki_data/，可指向 Obsidi
 
 - `api/auth.py`: `get_current_user()` 直接返回 `app.state.effective_user_id`
 - `api/deps.py`: 两个依赖——`get_store()`、`get_user_id()`
-- `mcp/auth.py`: `SingleUserTokenVerifier` 接受任意 token，返回固定 `SINGLE_USER_ID`
 - 启动时 `api/main.py` 的 lifespan 调用 `store.get_or_create_user()` 自动创建单用户
 
-### MCP 工具系统
+### Agent 与 Skills 工具
 
-6 个工具注册在 `mcp/tools/__init__.py`：
-- `guide` — 列出可用的 knowledge bases，展示完整 wiki 工作流
-- `search` — `list` 模式浏览文件树（Python glob），`search` 模式通过 ripgrep 全文搜索
-- `read` — 单文件或 glob 批量读取（120k 字符预算），PDF 分页读取，内嵌图片
-- `write` — `create`（新建 .md 文件）、`str_replace`（精确文本替换）、`append`（追加）
-- `delete` — 按路径或 glob 归档文档（移动到 `.trash/`）
-- `ask` — RAG 问答：ripgrep 搜索 wiki/ + sources/ → 拼上下文 → Ollama 综合回答
+Claude Code 通过 skills（`.claude/skills/*.md`）执行 wiki 维护——**直接在文件系统 + Git 上操作**，不再走 MCP 工具转发：
 
-MCP 数据访问通过 `mcp/store.py`（创建 FileStore 实例），不再使用数据库连接池。
+- `agent/run.py` — 后台常驻主循环，扫描 `sources/` → 创建 git 分支 → 调用 LLM（带 `agent/tools/` 工具）→ 自动 commit → 回到 master
+- `agent/providers/` — 适配 Anthropic / OpenAI 兼容 / Ollama 三种 LLM 后端
+- `agent/tools/` — agent 可调用的工具：`read_file` / `write_file` / `bash` / `manifest` 等
+- `api/agent_monitor.py` — API 侧读取 `agent/.state.json` + 日志，驱动 `/agent` 监控仪表盘
+
+wiki 写入的语义规则、index.md / log.md / overview.md 的维护约定见下文「Wiki 维护工作流（通过 Skills）」。
 
 ### 文档处理管道（`api/services/ocr.py`）
 
@@ -167,7 +269,7 @@ RAG 问答管道：`POST /v1/qa/ask` 接收 `{kb_id, question, top_k}` →
 
 ### Wiki 维护工作流（通过 Skills）
 
-Karpathy LLM Wiki 的核心理念：**LLM 全权拥有 wiki 层**。Claude Code 通过 MCP 工具连接后，使用 skills 执行 wiki 维护。
+Karpathy LLM Wiki 的核心理念：**LLM 全权拥有 wiki 层**。Claude Code 通过 skills（`.claude/skills/*.md`）执行 wiki 维护，直接在文件系统 + Git 上操作。
 
 **Skills vs Commands 命名空间**：
 - `.claude/skills/*.md` — **上下文触发**（Claude 按 description 匹配用户意图自动调用）
@@ -260,7 +362,7 @@ Karpathy LLM Wiki 的核心理念：**LLM 全权拥有 wiki 层**。Claude Code 
 | `/agent/log` | `agent_log_partial.html` | HTMX partial：主日志末尾（`?tail=N&level=all|warn|error`） |
 | `/agent/errors` | `agent_log_partial.html` | HTMX partial：errors 日志末尾（仅 WARNING+ERROR，`?tail=N`） |
 | `/agent/history` | `agent_history_partial.html` | HTMX partial：最近 ingest commits |
-| `/settings` | `settings.html` | MCP 配置 + 系统状态 + Wiki 根目录设置 |
+| `/settings` | `settings.html` | 系统状态 + Wiki 根目录设置 |
 
 **Agent 状态端点**（JSON）：
 | 路径 | 说明 |
@@ -296,7 +398,7 @@ Agent 双文件日志（`agent/run.py:37-78`），写在 `LOG_DIR`（默认 `./l
 
 ### 环境变量
 
-配置文件：api 和 mcp 都读 `../.env`。详见 `.env.example`。
+配置文件：api 和 agent 都读项目根目录的 `.env`。详见 `.env.example`。
 
 核心变量（`api/config.py` 中 `Settings` 类定义）：
 
@@ -312,9 +414,8 @@ Agent 双文件日志（`agent/run.py:37-78`），写在 `LOG_DIR`（默认 `./l
 | `PDF_BACKEND` | `pdf_oxide` | PDF 处理引擎（`pdf_oxide` 或 `mistral`） |
 | `MISTRAL_API_KEY` | `""` | Mistral OCR API 密钥（仅 PDF_BACKEND=mistral 时需要） |
 | `STAGE` | `dev` | 部署环境（dev/production） |
-| `APP_URL` | `http://localhost:8000` | API 自身 URL（CORS 白名单） |
-| `API_URL` | `http://localhost:8000` | API 自身 URL |
-| `MCP_URL` | `http://localhost:8080/mcp` | MCP 服务器 URL |
+| `APP_URL` | `http://localhost:8021` | API 自身 URL（CORS 白名单） |
+| `API_URL` | `http://localhost:8021` | API 自身 URL |
 | `AGENT_LOG_DIR` | `./logs/` | Agent 日志目录（相对项目根，可设绝对路径） |
 | `AGENT_LOG_FILE` | `<LOG_DIR>/agent.log` | 主日志文件名（自动追加 `.YYYY-MM-DD` 后缀轮转） |
 | `AGENT_LOG_ERROR_FILE` | `<LOG_DIR>/agent.errors.log` | 错误日志文件名（轮转后缀 `.YYYY-Www`） |

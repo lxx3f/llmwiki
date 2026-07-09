@@ -3,10 +3,6 @@ node_modules/
 .venv/
 venv/
 
-# MCP config (contains user IDs)
-.mcp.json
-mcp/local_server.py
-
 # Build
 .next/
 dist/
