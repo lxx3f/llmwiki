@@ -167,14 +167,19 @@ RAG 问答管道：`POST /v1/qa/ask` 接收 `{kb_id, question, top_k}` →
 
 ### Wiki 维护工作流（通过 Skills）
 
-Karpathy LLM Wiki 的核心理念：**LLM 全权拥有 wiki 层**。Claude Code 通过 MCP 工具连接后，使用 skills 执行 wiki 维护。Skills 定义在 `.claude/skills/` 目录中：
+Karpathy LLM Wiki 的核心理念：**LLM 全权拥有 wiki 层**。Claude Code 通过 MCP 工具连接后，使用 skills 执行 wiki 维护。
 
-| Skill | 功能 | 触发 |
-|-------|------|------|
-| `ingest` | 读源 → 摘要 → 更新 index → 更新关联页 → 追加 log | `/ingest` 或用户说要处理新文档 |
-| `query` | 先读 index → wiki 页面 → 不足时回退 RAG → 好答案归档 | 用户提问时 |
-| `lint` | 健康检查：矛盾/孤立/过时/缺失报告 | `/lint` |
-| `export-to-wiki` | 对话内容 → 识别知识点 → 写入 wiki | 用户说"导出到 wiki" |
+**Skills vs Commands 命名空间**：
+- `.claude/skills/*.md` — **上下文触发**（Claude 按 description 匹配用户意图自动调用）
+- `.claude/commands/*.md` — **显式斜杠命令**（用户输入 `/name` 调用）
+
+| Skill / Command | 类型 | 功能 | 触发 |
+|------------------|------|------|------|
+| `ingest` | skill | 读源 → 摘要 → 更新 index → 更新关联页 → 追加 log | `/ingest` 或用户说要处理新文档 |
+| `query` | skill | 先读 index → wiki 页面 → 不足时回退 RAG → 好答案归档 | 用户提问时 |
+| `lint` | skill | 健康检查：矛盾/孤立/过时/缺失报告 | `/lint` |
+| `export-to-wiki` | skill | 对话内容 → 识别知识点 → 写入 wiki | 用户说"导出到 wiki" |
+| `wrap-up` | **command** | 总结本次会话改动、检查/更新 README/CLAUDE.md/skills | `/wrap-up`（手动） |
 
 #### 核心约定：index.md 和 log.md
 
@@ -252,7 +257,8 @@ Karpathy LLM Wiki 的核心理念：**LLM 全权拥有 wiki 层**。Claude Code 
 | `/extractions/{task_id}` | `extraction_review.html` | 提取审核 |
 | `/qa` | `qa.html` | 问答界面 |
 | `/agent` | `agent.html` | Agent 监控仪表盘（HTMX 5s 自动刷新） |
-| `/agent/log` | `agent_log_partial.html` | HTMX partial：agent.log 最后 N 行 |
+| `/agent/log` | `agent_log_partial.html` | HTMX partial：主日志末尾（`?tail=N&level=all|warn|error`） |
+| `/agent/errors` | `agent_log_partial.html` | HTMX partial：errors 日志末尾（仅 WARNING+ERROR，`?tail=N`） |
 | `/agent/history` | `agent_history_partial.html` | HTMX partial：最近 ingest commits |
 | `/settings` | `settings.html` | MCP 配置 + 系统状态 + Wiki 根目录设置 |
 
@@ -262,6 +268,23 @@ Karpathy LLM Wiki 的核心理念：**LLM 全权拥有 wiki 层**。Claude Code 
 | `/v1/agent/status` | 状态 + KB 列表 + 待处理 + 最近历史 |
 
 > 注意：CLAUDE.md 中其他路由模块（`routes/health.py` 等）是大重构前的旧结构，实际已不存在。完整路由见 `api/main.py`。
+
+### Agent 日志系统
+
+Agent 双文件日志（`agent/run.py:37-78`），写在 `LOG_DIR`（默认 `./logs/`，相对项目根）下：
+
+| 文件 | 内容 | 轮转 | 保留 |
+|------|------|------|------|
+| `agent.log` | INFO/DEBUG 活动日志 | 每天午夜（`%Y-%m-%d`） | 7 份（约 1 周） |
+| `agent.errors.log` | WARNING+ERROR（**独占**，不与主日志重复） | 每周一（`%Y-W%W`） | 4 份（约 1 个月） |
+
+实现用 `logging.handlers.TimedRotatingFileHandler`。**主 handler 加了 `addFilter(lambda r: r.levelno < logging.WARNING)`** 排除 WARNING+——让 errors 文件**独占**严重级别，监控面板 `/agent/errors` 拿到的就是干净的错误信号。
+
+**writer（agent）** 和 **reader（`api/agent_monitor.py`）** 都从同一组 env 解析路径，writer/reader 一致——否则滚动后 reader 会找不到文件。
+
+监控面板 `/agent` 把日志分两个区域：
+- "近期活动"（主日志，每 5s 刷新）
+- "错误/警告"（errors 文件，每 10s 刷新）
 
 ### 前端技术栈
 
@@ -292,6 +315,12 @@ Karpathy LLM Wiki 的核心理念：**LLM 全权拥有 wiki 层**。Claude Code 
 | `APP_URL` | `http://localhost:8000` | API 自身 URL（CORS 白名单） |
 | `API_URL` | `http://localhost:8000` | API 自身 URL |
 | `MCP_URL` | `http://localhost:8080/mcp` | MCP 服务器 URL |
+| `AGENT_LOG_DIR` | `./logs/` | Agent 日志目录（相对项目根，可设绝对路径） |
+| `AGENT_LOG_FILE` | `<LOG_DIR>/agent.log` | 主日志文件名（自动追加 `.YYYY-MM-DD` 后缀轮转） |
+| `AGENT_LOG_ERROR_FILE` | `<LOG_DIR>/agent.errors.log` | 错误日志文件名（轮转后缀 `.YYYY-Www`） |
+| `AGENT_LOG_BACKUPS` | `7` | 主日志保留份数（约 1 周） |
+| `AGENT_LOG_ERROR_BACKUPS` | `4` | 错误日志保留份数（约 1 个月） |
+| `AGENT_LOG_LEVEL` | `INFO` | 全局最低日志级别（DEBUG/INFO/WARNING/ERROR） |
 | `LOGFIRE_TOKEN` | `""` | Logfire 可观测性（可选） |
 | `SENTRY_DSN` | `""` | Sentry 错误追踪（可选） |
 

@@ -118,9 +118,22 @@ http://localhost:8000/agent — 实时状态仪表盘：
 - **KB 指标**：每个 KB 的源文档数 + wiki 页面数
 - **待处理文档**：尚未 ingest 的 doc 列表
 - **最近历史**：git log 中的 ingest commits
-- **日志尾**：agent.log 最后 30 行，HTMX 5s 自动刷新
+- **日志分两个区域**：
+  - 近期活动（主日志，每 5s 刷新）
+  - 错误/警告（errors 日志，每 10s 刷新）
 
 Agent 写 `agent/.state.json`（idle/running/error + current_doc + branch + round），api 端点读取后渲染。
+
+### Agent 日志
+
+双文件写在 `LOG_DIR`（默认 `./logs/`，可用 `AGENT_LOG_DIR` 覆盖）：
+
+| 文件 | 内容 | 轮转 | 保留 |
+|------|------|------|------|
+| `agent.log` | INFO/DEBUG 活动日志 | 每天午夜 | 7 份（约 1 周） |
+| `agent.errors.log` | WARNING+ERROR（**独占**，不与主日志重复） | 每周一 | 4 份（约 1 个月） |
+
+主 handler 用 `addFilter` 排除 WARNING+，让 errors 文件独占严重级别。writer（agent）和 reader（`api/agent_monitor.py`）从同一组 env 解析路径，保证滚动后仍能找到文件。
 
 ## Git 作为状态机
 
