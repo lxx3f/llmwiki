@@ -1,0 +1,17 @@
+{% if items %}
+<ul class="space-y-2">
+    {% for item in items %}
+    <li class="text-sm flex items-start gap-2">
+        <code class="text-xs" style="color: var(--tw-text-muted);">{{ item.hash }}</code>
+        <div class="flex-1 min-w-0">
+            <div class="truncate">{{ item.message }}</div>
+            <div class="text-xs" style="color: var(--tw-text-muted);">
+                {{ item.date[:19] }}{% if item.doc_id %} · {{ item.doc_id }}{% endif %}
+            </div>
+        </div>
+    </li>
+    {% endfor %}
+</ul>
+{% else %}
+<div class="text-sm" style="color: var(--tw-text-muted);">暂无 ingest 历史</div>
+{% endif %}

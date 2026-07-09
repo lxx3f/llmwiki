@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+{% block title %}LLM Wiki - Agent 监控{% endblock %}
+
+{% block head %}
+<style>
+.status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 600;
+}
+.status-idle   { background: #d1fae5; color: #065f46; }
+.status-running { background: #fef3c7; color: #92400e; }
+.status-error  { background: #fee2e2; color: #991b1b; }
+.status-stale  { background: #e5e7eb; color: #374151; }
+.status-unknown { background: #f3f4f6; color: #6b7280; }
+.dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+}
+.dot-idle   { background: #10b981; }
+.dot-running { background: #f59e0b; animation: pulse 1.5s infinite; }
+.dot-error  { background: #ef4444; }
+.dot-stale  { background: #6b7280; }
+.dot-unknown { background: #9ca3af; }
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+.metric-card {
+    background: white;
+    border: 1px solid var(--tw-border);
+    border-radius: 8px;
+    padding: 16px;
+}
+.metric-label {
+    font-size: 12px;
+    color: var(--tw-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.metric-value {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--tw-text);
+    margin-top: 4px;
+}
+.log-line {
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    padding: 2px 8px;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+.log-line-error { background: #fef2f2; }
+.log-line-warning { background: #fffbeb; }
+.log-line-info { background: transparent; }
+.log-line-debug { color: var(--tw-text-muted); }
+.section-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--tw-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 12px;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto p-8" x-data="{ lastRefresh: new Date() }">
+    <div class="flex items-center justify-between mb-6">
+        <h1 class="text-2xl font-bold page-title">🤖 Agent 监控</h1>
+        <div class="flex items-center gap-3 text-sm" style="color: var(--tw-text-muted);">
+            <span>每 5s 自动刷新</span>
+            <button onclick="location.reload()" class="btn btn-ghost text-sm">↻ 手动刷新</button>
+        </div>
+    </div>
+
+    <!-- Status card -->
+    <div class="metric-card mb-6">
+        <div class="flex items-center justify-between flex-wrap gap-4">
+            <div class="flex items-center gap-4">
+                {% set s = state.state %}
+                {% if stale %}
+                    <span class="status-badge status-stale"><span class="dot dot-stale"></span>STALE</span>
+                {% elif s == 'running' %}
+                    <span class="status-badge status-running"><span class="dot dot-running"></span>运行中</span>
+                {% elif s == 'idle' %}
+                    <span class="status-badge status-idle"><span class="dot dot-idle"></span>空闲</span>
+                {% elif s == 'error' %}
+                    <span class="status-badge status-error"><span class="dot dot-error"></span>错误</span>
+                {% else %}
+                    <span class="status-badge status-unknown"><span class="dot dot-unknown"></span>未运行</span>
+                {% endif %}
+
+                <div>
+                    {% if state.current_doc %}
+                        <div class="text-lg font-semibold">{{ state.current_doc }}</div>
+                        <div class="text-sm" style="color: var(--tw-text-muted);">
+                            分支 <code>{{ state.branch }}</code>
+                            {% if state.round %}· 第 {{ state.round }} 轮{% endif %}
+                            {% if state.reason %}· {{ state.reason }}{% endif %}
+                        </div>
+                    {% else %}
+                        <div class="text-lg font-semibold" style="color: var(--tw-text-muted);">
+                            {% if s == 'error' and state.last_error %}错误: {{ state.last_error[:100] }}{% else %}无活动任务{% endif %}
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="text-sm" style="color: var(--tw-text-muted);">
+                最后更新: {{ state.last_update or '—' }}
+                {% if state.last_completed_at %}<br>上次完成: {{ state.last_completed_at }}{% endif %}
+            </div>
+        </div>
+        {% if stale %}
+        <div class="mt-3 text-sm" style="color: #92400e;">
+            ⚠ 状态长时间未更新（>5 分钟），Agent 可能已崩溃或僵死
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- KB stats -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        {% for kb in kbs %}
+        <div class="metric-card">
+            <div class="metric-label">{{ kb.slug }}</div>
+            <div class="flex gap-6 mt-2">
+                <div>
+                    <div class="metric-value">{{ kb.source_count }}</div>
+                    <div class="text-xs" style="color: var(--tw-text-muted);">源文档</div>
+                </div>
+                <div>
+                    <div class="metric-value">{{ kb.page_count }}</div>
+                    <div class="text-xs" style="color: var(--tw-text-muted);">wiki 页面</div>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Pending docs + recent ingests side by side -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+        <div class="metric-card">
+            <div class="section-title">⏳ 待处理文档 ({{ pending|length }})</div>
+            {% if pending %}
+            <ul class="space-y-1">
+                {% for d in pending %}
+                <li class="text-sm flex items-center gap-2">
+                    <span style="color: var(--tw-text-muted);">📄</span>
+                    <code class="text-xs">{{ d }}</code>
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <div class="text-sm" style="color: var(--tw-text-muted);">无待处理文档</div>
+            {% endif %}
+        </div>
+
+        <div class="metric-card">
+            <div class="section-title">📜 最近 ingest 历史</div>
+            <div hx-get="/agent/history?limit=8"
+                 hx-trigger="load, every 30s"
+                 hx-swap="innerHTML">
+                <div class="text-sm" style="color: var(--tw-text-muted);">加载中…</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Log tail -->
+    <div class="metric-card">
+        <div class="flex items-center justify-between mb-3">
+            <div class="section-title" style="margin-bottom: 0;">📋 Agent 日志（最后 30 行）</div>
+            <a href="/v1/agent/status" class="text-xs" style="color: var(--tw-text-muted);" target="_blank">JSON 状态 →</a>
+        </div>
+        <div hx-get="/agent/log?tail=30"
+             hx-trigger="load, every 5s"
+             hx-swap="innerHTML"
+             style="max-height: 400px; overflow-y: auto; background: #fafaf9; border-radius: 4px; padding: 8px 0;">
+            <div class="text-sm" style="color: var(--tw-text-muted);">加载中…</div>
+        </div>
+    </div>
+</div>
+{% endblock %}

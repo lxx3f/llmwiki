@@ -3,52 +3,298 @@
 
 {% block head %}
 <style>
-    .diff-add { background: #d4edda; color: #155724; }
-    .diff-del { background: #f8d7da; color: #721c24; }
-    .diff-hdr { color: #0366d6; }
-    .diff-file { color: #6f42c1; font-weight: bold; }
-    .diff-hunk { color: #6a737d; }
+    /* ── Diff viewer — Claude Code Edit style ── */
+    .diff-container {
+        font-family: "Cascadia Code", "Fira Code", "JetBrains Mono", "Consolas", monospace;
+        font-size: 13px;
+        line-height: 1.6;
+        background: var(--card-bg, #1e1e2e);
+        border-radius: 8px;
+        overflow: hidden;
+    }
+
+    .diff-file-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 16px;
+        background: #2d2d3f;
+        border-bottom: 1px solid #3d3d54;
+        font-weight: 600;
+        color: #c4a7ff;
+    }
+    .diff-file-header .icon { font-size: 16px; }
+    .diff-file-header .mode {
+        font-size: 11px;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-weight: 500;
+    }
+    .mode-new { background: #1a3d2e; color: #4caf84; }
+    .mode-mod { background: #3d3520; color: #d4a843; }
+    .mode-del { background: #3d1a1a; color: #e06c6c; }
+
+    .diff-hunk-header {
+        padding: 6px 16px;
+        color: #7a8ba0;
+        font-size: 12px;
+        background: #252536;
+        border-bottom: 1px solid #33334d;
+        user-select: none;
+    }
+
+    .diff-line {
+        display: flex;
+        padding: 0 16px;
+        min-height: 22px;
+        align-items: flex-start;
+    }
+    .diff-line .ln {
+        min-width: 50px;
+        text-align: right;
+        padding-right: 12px;
+        color: #555;
+        user-select: none;
+        flex-shrink: 0;
+    }
+    .diff-line .content {
+        white-space: pre-wrap;
+        word-break: break-all;
+        flex: 1;
+    }
+
+    .diff-add { background: #1a3d2e; }
+    .diff-add .content { color: #a8e6c1; }
+    .diff-add .ln { color: #4caf84; }
+
+    .diff-del { background: #3d1a1a; }
+    .diff-del .content { color: #f0a0a0; }
+    .diff-del .ln { color: #e06c6c; }
+
+    .diff-ctx { }
+    .diff-ctx .content { color: #b0b8c0; }
+    .diff-ctx .ln { color: #555; }
+
+    /* Empty line placeholder */
+    .diff-line .content:empty::after {
+        content: '\00a0';
+    }
+
+    /* Summary bar */
+    .diff-summary {
+        display: flex;
+        gap: 16px;
+        padding: 8px 16px;
+        background: #252536;
+        border-bottom: 1px solid #33334d;
+        font-size: 12px;
+    }
+    .diff-summary .stat { display: flex; align-items: center; gap: 4px; }
+    .stat-add { color: #4caf84; }
+    .stat-del { color: #e06c6c; }
+
+    /* Action bar */
+    .review-actions {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+    }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="p-6">
-    <div class="flex items-center justify-between mb-4">
-        <div>
-            <a href="/review" class="text-sm text-muted hover:underline">← 返回列表</a>
-            <h1 class="text-2xl font-bold mt-1">{{ branch }}</h1>
-        </div>
-        <div class="flex gap-2">
-            <form method="POST" action="/review/{{ branch }}/approve" class="inline"
-                  onsubmit="return confirm('确定要合并 {{ branch }}？')">
-                <button class="px-4 py-2 bg-green-600 text-white rounded text-sm hover:bg-green-700 transition-colors">
-                    批准合并
-                </button>
-            </form>
-            <form method="POST" action="/review/{{ branch }}/reject" class="inline"
-                  onsubmit="return confirm('确定要拒绝 {{ branch }}？此分支将被删除。')">
-                <button class="px-4 py-2 bg-red-500 text-white rounded text-sm hover:bg-red-600 transition-colors">
-                    拒绝
-                </button>
-            </form>
-        </div>
+<div class="p-6 max-w-4xl mx-auto">
+    <!-- Back link + title -->
+    <div class="mb-4">
+        <a href="/review" class="text-sm text-muted hover:underline">← 返回审核列表</a>
+        <h1 class="text-xl font-bold mt-1 flex items-center gap-3">
+            {{ branch }}
+            <span class="text-sm font-normal text-muted">{{ message.split('\n')[0] }}</span>
+        </h1>
     </div>
 
-    <div class="card p-4 mb-4">
-        <p class="text-sm text-muted">Commit:</p>
-        <pre class="text-sm">{{ message }}</pre>
+    <!-- Review actions -->
+    <div class="review-actions flex items-center gap-3 mb-6 p-3 rounded-lg" style="background: var(--card-bg, #1e1e2e);">
+        <span class="text-sm text-muted mr-2">审核操作:</span>
+        <form method="POST" action="/review/{{ branch }}/approve" class="inline"
+              onsubmit="return confirm('确定要合并 {{ branch }}？变更将应用到 wiki。')">
+            <button class="px-4 py-2 bg-green-600 text-white rounded text-sm font-medium hover:bg-green-700 transition-colors">
+                ✓ 批准合并
+            </button>
+        </form>
+        <form method="POST" action="/review/{{ branch }}/reject" class="inline"
+              onsubmit="return confirm('确定要拒绝 {{ branch }}？此分支及其所有变更将被删除。')">
+            <button class="px-4 py-2 bg-red-500 text-white rounded text-sm font-medium hover:bg-red-600 transition-colors">
+                ✗ 拒绝
+            </button>
+        </form>
     </div>
 
-    {% if stat %}
-    <div class="card p-4 mb-4">
-        <p class="text-sm text-muted mb-2">变更文件:</p>
-        <pre class="text-sm">{{ stat }}</pre>
-    </div>
-    {% endif %}
-
-    <div class="card p-4">
-        <p class="text-sm text-muted mb-2">Diff:</p>
-        <pre class="text-xs leading-relaxed overflow-x-auto">{{ diff }}</pre>
-    </div>
+    <!-- Diff view -->
+    <div class="diff-container" id="diff-view"></div>
 </div>
+
+<script>
+(function() {
+    const raw = {{ diff | tojson }};
+    const container = document.getElementById('diff-view');
+
+    if (!raw || raw.trim() === '') {
+        container.innerHTML = '<div class="p-6 text-center text-muted">无变更内容</div>';
+        return;
+    }
+
+    const lines = raw.split('\n');
+    const fragments = [];
+    let currentFile = null;
+    let currentHunkLines = [];
+    let stats = { adds: 0, dels: 0 };
+
+    function flushFile() {
+        if (!currentFile) return;
+        if (currentHunkLines.length === 0) return;
+        currentFile.hunks.push({ lines: currentHunkLines });
+        currentHunkLines = [];
+    }
+
+    function flushHunk() {
+        if (!currentFile || currentHunkLines.length === 0) return;
+        currentFile.hunks.push({ lines: currentHunkLines });
+        currentHunkLines = [];
+    }
+
+    function emitFile() {
+        flushHunk();
+        if (!currentFile) return;
+        fragments.push(currentFile);
+        currentFile = null;
+    }
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+
+        // File header: diff --git a/... b/...
+        if (line.startsWith('diff --git ')) {
+            emitFile();
+            const m = line.match(/diff --git a\/(.*?) b\/(.*)/);
+            const path = m ? m[2] : line;
+            currentFile = {
+                path: path,
+                mode: 'modified',
+                hunks: [],
+                fileAdds: 0,
+                fileDels: 0,
+            };
+            continue;
+        }
+
+        // New file / deleted file
+        if (line.startsWith('new file mode')) {
+            if (currentFile) currentFile.mode = 'new';
+            continue;
+        }
+        if (line.startsWith('deleted file mode')) {
+            if (currentFile) currentFile.mode = 'deleted';
+            continue;
+        }
+        if (line.startsWith('index ') || line.startsWith('--- ') || line.startsWith('+++ ')) {
+            continue;
+        }
+        if (line.startsWith('similarity index') || line.startsWith('rename ')) {
+            continue;
+        }
+
+        // Hunk header: @@ -a,b +c,d @@
+        if (line.startsWith('@@')) {
+            flushHunk();
+            if (currentFile) {
+                currentFile.hunks.push({ header: line, lines: [] });
+            }
+            continue;
+        }
+
+        if (!currentFile) continue;
+
+        // Ensure we have a hunk
+        if (currentFile.hunks.length === 0) {
+            currentFile.hunks.push({ header: '', lines: [] });
+        }
+
+        const hunk = currentFile.hunks[currentFile.hunks.length - 1];
+        hunk.lines.push(line);
+
+        if (line.startsWith('+') && !line.startsWith('+++')) {
+            stats.adds++;
+            currentFile.fileAdds++;
+        } else if (line.startsWith('-') && !line.startsWith('---')) {
+            stats.dels++;
+            currentFile.fileDels++;
+        }
+    }
+    emitFile();
+
+    // ── Render ──
+    let html = '';
+
+    // Summary
+    if (fragments.length > 0) {
+        const changedFiles = fragments.filter(f => f.fileAdds > 0 || f.fileDels > 0).length;
+        html += '<div class="diff-summary">';
+        html += `<span>${fragments.length} 个文件</span>`;
+        html += `<span class="stat stat-add">+${stats.adds} 行</span>`;
+        html += `<span class="stat stat-del">-${stats.dels} 行</span>`;
+        html += '</div>';
+    }
+
+    // File-by-file
+    for (const file of fragments) {
+        const modeClass = file.mode === 'new' ? 'mode-new' : file.mode === 'deleted' ? 'mode-del' : 'mode-mod';
+        const modeText = file.mode === 'new' ? '新建' : file.mode === 'deleted' ? '删除' : '修改';
+        const icon = file.mode === 'new' ? '📄' : file.mode === 'deleted' ? '🗑' : '📝';
+
+        html += '<div class="diff-file-header">';
+        html += `<span class="icon">${icon}</span>`;
+        html += `<span>${escapeHtml(file.path)}</span>`;
+        html += `<span class="mode ${modeClass}">${modeText}</span>`;
+        if (file.fileAdds > 0 || file.fileDels > 0) {
+            html += `<span style="font-size:12px;color:#888;">`;
+            if (file.fileAdds > 0) html += `<span style="color:#4caf84;">+${file.fileAdds}</span> `;
+            if (file.fileDels > 0) html += `<span style="color:#e06c6c;">-${file.fileDels}</span>`;
+            html += '</span>';
+        }
+        html += '</div>';
+
+        for (const hunk of file.hunks) {
+            if (hunk.header) {
+                html += `<div class="diff-hunk-header">${escapeHtml(hunk.header)}</div>`;
+            }
+            for (const line of hunk.lines) {
+                let cls, prefix;
+                if (line.startsWith('+')) {
+                    cls = 'diff-add';
+                } else if (line.startsWith('-')) {
+                    cls = 'diff-del';
+                } else {
+                    cls = 'diff-ctx';
+                }
+                html += `<div class="diff-line ${cls}">`;
+                html += `<span class="content">${escapeHtml(line)}</span>`;
+                html += '</div>';
+            }
+        }
+    }
+
+    if (fragments.length === 0) {
+        html = '<div class="p-6 text-center text-muted">无有效 diff 内容</div>';
+    }
+
+    container.innerHTML = html;
+
+    function escapeHtml(str) {
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+})();
+</script>
 {% endblock %}

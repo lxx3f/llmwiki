@@ -8,7 +8,7 @@
             <h2 class="font-semibold truncate page-title">{{ kb.name }}</h2>
         </div>
 
-        <div class="flex-1 overflow-y-auto" x-data="{tab: 'wiki'}">
+        <div class="flex-1 overflow-y-auto" x-data="{tab: '{{ 'sources' if active_source else 'wiki' }}'}">
             <div class="flex border-b border-default">
                 <button @click="tab='wiki'"
                         :class="tab==='wiki' ? 'tab-btn-active' : ''"
@@ -40,9 +40,24 @@
 
             <div x-show="tab==='sources'" class="p-2">
                 {% for doc in source_docs %}
-                <div class="px-3 py-1.5 rounded text-sm text-subtle">
-                    📁 {{ doc.name }}
-                    <span class="text-xs text-placeholder ml-1">({{ doc.files | length }} 文件)</span>
+                <div class="mb-2">
+                    <div class="px-3 py-1.5 text-xs font-semibold text-subtle uppercase tracking-wide">
+                        📁 {{ doc.name }}
+                    </div>
+                    <div class="ml-2">
+                    {% for filename in doc.files %}
+                        <a href="/wiki/{{ kb.slug }}?source={{ doc.id }}&file={{ filename }}"
+                           class="block px-3 py-1 rounded text-sm transition-colors doc-link {% if active_source and active_source.doc_id == doc.id and active_source.file_name == filename %}doc-link-active{% endif %}">
+                            {% if filename.endswith('.pdf') %}📕
+                            {% elif filename.endswith(('.md', '.markdown', '.txt')) %}📝
+                            {% elif filename.endswith(('.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg')) %}🖼️
+                            {% elif filename.endswith('.json') %}⚙️
+                            {% else %}📄
+                            {% endif %}
+                            {{ filename }}
+                        </a>
+                    {% endfor %}
+                    </div>
                 </div>
                 {% endfor %}
                 {% if not source_docs %}
@@ -65,11 +80,45 @@
                 {{ active_doc.content | safe }}
             </div>
         </div>
+        {% elif active_source %}
+        <div class="h-full flex flex-col">
+            <div class="px-8 py-4 border-b border-default flex items-center gap-3">
+                <span class="text-xs text-subtle">原始资料</span>
+                <span class="text-placeholder">/</span>
+                <span class="text-sm text-subtle">{{ active_source.doc_id }}</span>
+                <span class="text-placeholder">/</span>
+                <h1 class="text-lg font-semibold page-title">{{ active_source.file_name }}</h1>
+                <div class="ml-auto flex gap-2">
+                    <a href="{{ active_source.url }}" target="_blank"
+                       class="text-xs px-3 py-1.5 rounded border border-default hover:border-accent transition-colors">
+                        在新窗口打开
+                    </a>
+                    <a href="{{ active_source.url }}" download
+                       class="text-xs px-3 py-1.5 rounded border border-default hover:border-accent transition-colors">
+                        下载
+                    </a>
+                </div>
+            </div>
+
+            <div class="flex-1 overflow-auto p-8">
+                {% if active_source.view_mode == 'image' %}
+                <div class="flex items-center justify-center">
+                    <img src="{{ active_source.url }}" alt="{{ active_source.file_name }}"
+                         class="max-w-full max-h-full rounded shadow-lg" />
+                </div>
+                {% else %}
+                <iframe src="{{ active_source.url }}"
+                        class="w-full bg-white rounded shadow-lg"
+                        style="height: calc(100vh - 200px); min-height: 600px;"
+                        title="{{ active_source.file_name }}"></iframe>
+                {% endif %}
+            </div>
+        </div>
         {% else %}
         <div class="flex items-center justify-center h-full text-placeholder">
             <div class="text-center">
-                <p class="text-lg mb-2">选择一个 wiki 页面</p>
-                <p class="text-sm">从侧边栏选择查看内容</p>
+                <p class="text-lg mb-2">选择一个页面</p>
+                <p class="text-sm">从侧边栏选择 wiki 页面或原始资料</p>
             </div>
         </div>
         {% endif %}

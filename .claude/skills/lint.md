@@ -9,152 +9,80 @@ description: 对 wiki 进行健康检查——矛盾检测、孤立页面、过�
 
 ## 核心理念
 
-wiki 随着增长会积累问题：新旧知识矛盾、孤立页面、过时论断、缺失交叉引用。Agent 是唯一能系统性做这种维护工作的实体。
+lint 分两层：
 
-## 工作流程
+1. **确定性检查**（由 `lint` 工具完成）：stats / orphans / outdated / unindexed / contradiction_ctx
+2. **语义判断**（由 LLM 完成）：基于 contradiction_ctx 上下文判断 snippets 是否真矛盾
 
-### 阶段 1: 获取全局视图
+Agent 不再手写 ripgrep + git log 脚本——直接调 `lint` 工具拿结构化数据。
 
-```bash
-# 目录结构
-ls -R wiki/
+## 工作流
 
-# 索引和日志
-cat wiki/index.md
-cat wiki/log.md
+### 1. 调用 lint 工具
 
-# 页面总数
-find wiki/ -name "*.md" | wc -l
+```
+lint action="scan" kb_slug="main"
 ```
 
-### 阶段 2: 矛盾检测
+返回结构：
+- `stats` — 页面/源文档统计
+- `orphans` — 无入站引用的孤立页面
+- `outdated` — 源文件比最后 ingest commit 新的文档
+- `unindexed` — 存在但 index.md 没列出的内容页
+- `contradiction_ctx` — 核心概念在多页面的提及片段（你来判断）
 
-检查不同页面之间的事实性声明是否一致。
+### 2. LLM 判断矛盾
 
-**方法**:
-1. 从 index.md 识别核心概念和实体
-2. 用 ripgrep 对每个核心主题搜索所有提及它的页面：
-   ```bash
-   rg -i "<核心主题>" wiki/
-   ```
-3. 读取相关页面，比较声明
-4. 重点关注：统计数据、日期、因果关系声明、技术细节
+读 `contradiction_ctx` 里的 snippets，判断：
 
-**输出格式**:
-```
-⚠️ 矛盾: concepts/A.md 声称 "X 是 Y 的原因"
-         但 summaries/B-paper.md 的结论是 "X 与 Y 无关"
-   → 建议: 进一步查证或标注不确定性
-```
+- 不同页面是否对同一概念做了**矛盾的事实声明**
+- 重点关注：统计数据、日期、因果关系、技术细节
+- 多数情况是互补而非矛盾——谨慎报告
 
-### 阶段 3: 孤立页面检测
+### 3. 写健康报告到 synthesis/
 
-识别没有被任何其他页面引用的页面。
-
-**方法**:
-```bash
-# 获取所有 wiki 页面列表
-find wiki/ -name "*.md" -not -name "index.md" -not -name "log.md"
-
-# 对每个页面，检查是否被其他页面引用
-for page in wiki/**/*.md; do
-  pagename=$(basename "$page" .md)
-  refs=$(rg -l "$pagename" wiki/ --glob '!index.md' --glob '!log.md' | grep -v "$page" | wc -l)
-  if [ "$refs" -eq 0 ]; then
-    echo "孤立: $page"
-  fi
-done
-```
-
-**输出格式**:
-```
-🔗 孤立页面: concepts/obscure-topic.md — 无页面链接到它
-   → 建议: 添加相关页面的交叉引用，或考虑合并
-```
-
-### 阶段 4: 过时内容检测
-
-**方法**:
-1. 查 log.md 看最早 ingest 的时间和最新源加入的时间
-2. 识别有更新的源（源 commit 晚于最后 ingest commit）：
-   ```bash
-   for dir in sources/*/; do
-     doc_id=$(basename "$dir")
-     last_ingest=$(git log --oneline master --grep="ingest: $doc_id" --format="%H" -1)
-     last_source=$(git log --oneline master --format="%H" -1 -- "$dir")
-     if [ -n "$last_ingest" ] && [ "$last_source" != "$last_ingest" ]; then
-       echo "需要 re-ingest: $doc_id"
-     fi
-   done
-   ```
-3. 检查早期页面引用的源是否已被新源覆盖
-
-**输出格式**:
-```
-🕐 可能过时: synthesis/object-detection.md 基于 2024-03 的源，
-          但 2026-06 新增了两篇相关论文且未 re-ingest
-   → 建议: 重新审定
-```
-
-### 阶段 5: 缺失交叉引用
-
-**方法**: 检查语义相关的页面是否互相链接了。
-```bash
-# 搜索可能相关但未互链的页面
-rg -i "<主题A>" wiki/ --files-with-matches
-rg -i "<主题B>" wiki/ --files-with-matches
-# 检查两个结果集中的页面是否互含对方链接
-```
-
-**输出格式**:
-```
-🔀 缺少交叉引用: concepts/A.md 和 concepts/B.md 讨论紧密相关主题但未互链
-```
-
-### 阶段 6: 综合报告
-
-输出总结性健康报告：
+写到 `<kb>/wiki/synthesis/health-report-<YYYY-MM-DD>.md`：
 
 ```markdown
-# Wiki 健康报告 — [YYYY-MM-DD]
+# Wiki 健康报告 — YYYY-MM-DD
 
-## 总览
-- Wiki 页面总数: N
-- 源文档总数: M
-- 待 re-ingest: K
-- 发现问题: X
+> 检查范围: {kb} | 页面: N | 源文档: M
 
-## 按严重程度
+## 🔴 矛盾（事实冲突）
 
-### 🔴 矛盾（需立即关注）
-...
+- ❌ concepts/A.md vs concepts/B.md 关于 "X":
+  - A.md 声称: "..."
+  - B.md 声称: "..."
 
-### 🟡 过时（建议复查）
-...
+## 🟡 过时（建议复查）
 
-### 🔗 孤立（需要链接）
-...
+- 003__xxx — 源已更新但 wiki 未跟进
 
-### 🔀 交叉引用缺失
-...
+## 🔗 孤立（需要链接）
 
-### 📝 建议创建
-...
+- concepts/yyy.md — 无任何 wiki 页面引用它
+
+## 整体状态
+
+- 知识覆盖: 🟢 / 🟡 / 🔴
+- 关键风险: 0 个事实矛盾，2 个过时源
 
 ## 建议下一步
+
 1. ...
-2. ...
 ```
 
-## 示例
+### 4. 提交
 
-用户: "/lint"
+```bash
+git add -A
+git commit -m "lint: <kb> 健康检查 <YYYY-MM-DD>"
+```
 
-Agent 执行:
-```
-1. cat wiki/index.md → 了解全局
-2. rg 抽查关键页面
-3. 运行孤立页面脚本
-4. 运行 re-ingest 检测
-5. 综合生成健康报告
-```
+Agent 会自动 checkout master。
+
+## 原则
+
+- 不把 lint 工具的原始 JSON 输出塞进 wiki——读它，理解它，写人类可读的报告
+- 矛盾判断要谨慎——不同时期、不同角度的描述不算矛盾
+- 报告本身是 wiki 页面——写得好读、给可执行建议

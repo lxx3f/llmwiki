@@ -1,0 +1,7 @@
+{% for line in lines %}
+{% set level = parse_level(line) %}
+<div class="log-line log-line-{{ level|lower }}">{{ line }}</div>
+{% endfor %}
+{% if not lines %}
+<div class="log-line log-line-info" style="color: var(--tw-text-muted);">（日志为空）</div>
+{% endif %}

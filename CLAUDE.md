@@ -253,7 +253,17 @@ Karpathy LLM Wiki 的核心理念：**LLM 全权拥有 wiki 层**。Claude Code 
 | `/extractions` | `extraction.html` | 待提取任务列表 |
 | `/extractions/{task_id}` | `extraction_review.html` | 提取审核 |
 | `/qa` | `qa.html` | 问答界面 |
+| `/agent` | `agent.html` | Agent 监控仪表盘（HTMX 5s 自动刷新） |
+| `/agent/log` | `agent_log_partial.html` | HTMX partial：agent.log 最后 N 行 |
+| `/agent/history` | `agent_history_partial.html` | HTMX partial：最近 ingest commits |
 | `/settings` | `settings.html` | MCP 配置 + 系统状态 + Wiki 根目录设置 |
+
+**Agent 状态端点**（JSON）：
+| 路径 | 说明 |
+|------|------|
+| `/v1/agent/status` | 状态 + KB 列表 + 待处理 + 最近历史 |
+
+> 注意：CLAUDE.md 中其他路由模块（`routes/health.py` 等）是大重构前的旧结构，实际已不存在。完整路由见 `api/main.py`。
 
 ### 前端技术栈
 

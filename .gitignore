@@ -20,6 +20,7 @@ dist/
 # Python
 __pycache__/
 *.pyc
+.pytest_cache/
 
 # IDE
 .idea/
@@ -37,3 +38,11 @@ package-lock.json
 # Local Netlify folder
 .netlify
 nvidia-10k-first20.md
+
+# logs
+*/agent.log
+
+# Runtime data (FileStore + TUS uploads + agent state)
+api/wiki_data/
+api/data/files/
+agent/.state.json
